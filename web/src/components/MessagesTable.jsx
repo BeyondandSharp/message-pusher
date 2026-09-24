@@ -76,22 +76,33 @@ const MessagesTable = () => {
   }); // Message to be viewed
   const [viewModalOpen, setViewModalOpen] = useState(false);
 
+  // 列表请求的序号：只让最新一次请求的结果落地。
+  // 否则一个先发出、后返回的旧响应会把刚删掉的行重新写回列表（表现为「删了又出现」）。
+  const loadSeq = useRef(0);
+
   const loadMessages = async (startIdx) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     const res = await API.get(`/api/message/?p=${startIdx}`);
+    if (seq !== loadSeq.current) {
+      // 已经有更新的请求发出，丢弃这次过期响应
+      return;
+    }
+    setLoading(false);
     const { success, message, data } = res.data;
     if (success) {
       if (startIdx === 0) {
         setMessages(data);
       } else {
-        let newMessages = messages;
-        newMessages.push(...data);
-        setMessages(newMessages);
+        setMessages((messages) => {
+          // 翻页追加时同样按 id 去重：列表在两次请求之间可能已经变化
+          const known = new Set(messages.map((m) => m.id));
+          return [...messages, ...data.filter((m) => !known.has(m.id))];
+        });
       }
     } else {
       showError(message);
     }
-    setLoading(false);
   };
 
   const onPaginationChange = (page) => {
@@ -134,23 +145,53 @@ const MessagesTable = () => {
         showError(reason);
       });
     checkPermission().then();
+
+    // 消息推送流（SSE）。这里有两个必须处理好的点：
+    // 1. 重连要退避。固定 1 秒重连会在服务端限流（429，默认 60 次/3 分钟）时把限流窗口一直占满，
+    //    导致此后所有请求都返回 429，而且永远恢复不了（表现为「请求次数过多」刷屏）。
+    // 2. 卸载时要清掉待触发的定时器，否则离开本页会留下一个永不停止的重连循环。
+    let eventSource = null;
+    let retryTimer = null;
+    let retryDelay = 1000;
+    let retryNotified = false;
+    let closed = false;
+
     const connectEventSource = () => {
-      const eventSource = new EventSource('/api/message/stream');
+      if (closed) return;
+      eventSource = new EventSource('/api/message/stream');
+      eventSource.onopen = () => {
+        retryDelay = 1000;
+        retryNotified = false;
+      };
       eventSource.onmessage = (e) => {
         const newMessage = JSON.parse(e.data);
         insertNewMessage(newMessage);
       };
       eventSource.onerror = () => {
-        showError('服务端消息推送流连接出错！即将重试...');
-        eventSource.close();
-        setTimeout(connectEventSource, 1000); // 1000ms
+        if (eventSource) {
+          eventSource.close();
+        }
+        if (closed) return;
+        if (!retryNotified) {
+          retryNotified = true;
+          showWarning('消息推送流连接中断，正在重连（最长 60 秒一次）...');
+        }
+        console.warn(`消息推送流断开，${retryDelay / 1000} 秒后重连`);
+        retryTimer = setTimeout(connectEventSource, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 60000);
       };
-      return eventSource;
     };
-    const eventSource = connectEventSource();
+
+    connectEventSource();
     showInfo('服务器消息推送流已连接，您将实时收到新消息');
     return () => {
-      eventSource.close();
+      closed = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
 
@@ -179,15 +220,16 @@ const MessagesTable = () => {
     setLoading(false);
   };
 
-  const deleteMessage = async (id, record) => {
+  const deleteMessage = async (id) => {
     setLoading(true);
     const res = await API.delete(`/api/message/${id}`);
     const { success, message } = res.data;
     if (success) {
       showSuccess('操作成功完成！');
-      let newMessages = [...messages];
-      record.deleted = true;
-      setMessages(newMessages);
+      // 按 id 直接过滤，而不是给行对象打 deleted 标记 —— 标记会在列表刷新时丢失
+      setMessages((messages) => messages.filter((m) => m.id !== id));
+      // 再从服务端拉一次作为权威数据：同时让进行中的旧请求因序号过期而被丢弃
+      await loadMessages(0);
     } else {
       showError(message);
     }
@@ -232,11 +274,16 @@ const MessagesTable = () => {
   };
 
   const insertNewMessage = (message) => {
-    console.log(messages);
     setMessages((messages) => {
-      let newMessages = [message];
-      newMessages.push(...messages);
-      return newMessages;
+      // 同一条消息既可能由 SSE 推来、又可能被列表接口拉到（SSE 推送是 goroutine，
+      // 可能晚于列表刷新），按 id 去重，否则列表里会出现两行、删掉一行另一行还在。
+      const idx = messages.findIndex((m) => m.id === message.id);
+      if (idx >= 0) {
+        const next = [...messages];
+        next[idx] = message;
+        return next;
+      }
+      return [message, ...messages];
     });
     setActivePage(1);
   };
@@ -360,7 +407,7 @@ const MessagesTable = () => {
             description={'删除消息 #' + record.id}
             okButtonProps={{ danger: true, loading }}
             onConfirm={() => {
-              deleteMessage(record.id, record).then();
+              deleteMessage(record.id).then();
             }}
           >
             <Button size={'small'} danger>
