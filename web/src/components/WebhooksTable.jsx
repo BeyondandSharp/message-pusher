@@ -9,7 +9,7 @@ import {
   Tag,
   Tooltip,
 } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, copy, showError, showSuccess, showWarning } from '../helpers';
 
@@ -288,6 +288,7 @@ const WebhooksTable = () => {
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}
+            suffix={searching ? <LoadingOutlined /> : null}
             placeholder='搜索接口的 ID，链接或名称 ...'
             value={searchKeyword}
             onChange={handleKeywordChange}

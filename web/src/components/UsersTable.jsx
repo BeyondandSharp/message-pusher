@@ -9,7 +9,7 @@ import {
   Table,
   Tag,
 } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, showError, showSuccess } from '../helpers';
 
@@ -316,6 +316,7 @@ const UsersTable = () => {
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}
+            suffix={searching ? <LoadingOutlined /> : null}
             placeholder='搜索用户的 ID，用户名，显示名称，以及邮箱地址 ...'
             value={searchKeyword}
             onChange={handleKeywordChange}

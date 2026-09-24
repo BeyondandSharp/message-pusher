@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, Pagination, Popconfirm, Table, Tag } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, showError, showSuccess, testChannel } from '../helpers';
 
@@ -282,6 +282,7 @@ const ChannelsTable = () => {
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}
+            suffix={searching ? <LoadingOutlined /> : null}
             placeholder='搜索通道的 ID 或名称 ...'
             value={searchKeyword}
             onChange={handleKeywordChange}

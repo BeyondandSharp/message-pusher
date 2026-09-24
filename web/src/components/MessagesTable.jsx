@@ -9,7 +9,7 @@ import {
   Table,
   Tag,
 } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import {
   API,
   openPage,
@@ -382,6 +382,7 @@ const MessagesTable = () => {
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}
+            suffix={searching ? <LoadingOutlined /> : null}
             placeholder='搜索消息的 ID，标题，描述，以及消息内容 ...'
             value={searchKeyword}
             onChange={handleKeywordChange}
