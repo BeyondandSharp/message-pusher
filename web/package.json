@@ -10,7 +10,7 @@
     "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router-dom": "^6.3.0",
+    "react-router-dom": "^7.18.4",
     "react-turnstile": "^1.0.5"
   },
   "scripts": {
