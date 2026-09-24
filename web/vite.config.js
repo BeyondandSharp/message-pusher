@@ -17,6 +17,44 @@ export default defineConfig(({ mode }) => ({
     // `[data-tooltip]:after .header` 这类“伪元素后接后代选择器”的写法（浏览器能容忍、esbuild 也能）；
     // 换回 esbuild 压缩，与原来 CRA 的行为一致。
     cssMinify: 'esbuild',
+    // 默认切分会把 node_modules 里的依赖和应用代码混成两个 600+ kB 的大 chunk，
+    // Vite 因此告警。这里按库拆开：每个 chunk 都在 500 kB 以下，浏览器可并行下载，
+    // 而且依赖变动频率远低于业务代码，升级依赖时业务 chunk 的缓存依然有效。
+    rolldownOptions: {
+      output: {
+        advancedChunks: {
+          groups: [
+            {
+              name: 'react',
+              test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            {
+              name: 'antd-icons',
+              test: /[\\/]node_modules[\\/]@ant-design[\\/]/,
+            },
+            // antd 本体压缩后有 700+ kB，按最重的组件族再拆一层，
+            // 让每个 chunk 都落在 Vite 的 500 kB 告警阈值以下。
+            {
+              name: 'rc-table',
+              test: /[\\/]node_modules[\\/]@rc-component[\\/]table[\\/]/,
+            },
+            {
+              name: 'antd-table',
+              test: /[\\/]node_modules[\\/]antd[\\/](es|lib)[\\/]table[\\/]/,
+            },
+            {
+              name: 'antd-form',
+              test: /[\\/]node_modules[\\/](antd[\\/](es|lib)[\\/](form|input|select|checkbox|radio|switch|input-number)|@rc-component[\\/](form|input|select|checkbox|radio|switch|input-number))[\\/]/,
+            },
+            {
+              name: 'antd',
+              test: /[\\/]node_modules[\\/](antd|@rc-component|rc-[a-z-]+)[\\/]/,
+            },
+            { name: 'vendor', test: /[\\/]node_modules[\\/]/ },
+          ],
+        },
+      },
+    },
   },
   server: {
     // 对应原来 CRA 的 proxy 字段：开发时把接口请求转发到本地 Go 服务
