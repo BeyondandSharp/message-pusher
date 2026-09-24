@@ -1,7 +1,7 @@
 module message-pusher
 
-// +heroku goVersion go1.26
-go 1.26.0
+// +heroku goVersion go1.27
+go 1.27.0
 
 require (
 	github.com/gin-contrib/sessions v1.1.2
@@ -56,7 +56,7 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.2 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.9.1 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/arch v0.31.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

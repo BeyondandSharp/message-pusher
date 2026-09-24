@@ -4,7 +4,7 @@
 # 用法见同目录的 build-image-alpine.sh。
 
 # ---------------------------------------------------------------- 前端
-FROM node:20-alpine AS frontend
+FROM node:24-alpine AS frontend
 
 ARG VERSION=dev
 ARG NPM_REGISTRY=https://registry.npmjs.org
@@ -26,11 +26,14 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY web/ ./
 
+# 同 Dockerfile：清掉本机残留的前端产物，避免 Vite 把旧的 build/index.html 当成输入
+RUN rm -rf build
+
 # Vite 在构建时把 import.meta.env.VITE_* 静态替换进产物，这里注入版本号（对应页脚的显示）
 RUN VITE_APP_VERSION="${VERSION}" pnpm run build
 
 # ---------------------------------------------------------------- 后端
-FROM golang:1.26-alpine AS backend
+FROM golang:1.27-alpine AS backend
 
 ARG VERSION=dev
 # Go 模块代理：默认走局域网里的 Athens 缓存代理（实测冷缓存拉全依赖约 10 秒）。
@@ -76,7 +79,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
 
 # ---------------------------------------------------------------- 运行时
-FROM alpine:3.20
+FROM alpine:3.24
 
 ARG VERSION=dev
 ARG APK_PROXY=""

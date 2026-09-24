@@ -3,7 +3,7 @@
 # 与根目录的 Dockerfile 的区别：前端由本机 pnpm 预先构建到 web/build，
 # 这里只负责在容器内编译 Go 后端并组装最终镜像。
 # 直接 docker build 本文件前，请先确保 web/build/index.html 已存在。
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 ARG VERSION=dev
 # Go 模块代理：默认走局域网里的 Athens 缓存代理（实测冷缓存拉全依赖约 10 秒）。
@@ -39,7 +39,7 @@ RUN go mod download
 COPY . .
 RUN go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 ARG VERSION=dev
 ARG APK_PROXY=""
