@@ -13,8 +13,10 @@ WORKDIR /build/web
 
 RUN npm install -g pnpm --registry=${NPM_REGISTRY}
 
-# 先只拷贝依赖清单，依赖没变时可以复用这一层缓存；带上 lockfile 以保证装到同样的版本
-COPY web/package.json web/pnpm-lock.yaml ./
+# 先只拷贝依赖清单，依赖没变时可以复用这一层缓存；带上 lockfile 以保证装到同样的版本。
+# pnpm-workspace.yaml 也必须带上：里面的 minimumReleaseAgeExclude 是 pnpm 的发布年龄策略豁免，
+# 缺了它 pnpm 会以 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION 拒绝按 lockfile 安装。
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 
 # pnpm 10+ 默认不执行依赖包自带的 build 脚本（esbuild 等会因此报 ERR_PNPM_IGNORED_BUILDS），
 # 这些脚本对构建产物没有影响，用 --ignore-scripts 安装即可。
