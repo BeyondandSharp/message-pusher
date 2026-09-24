@@ -1,15 +1,101 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
+	"sort"
+	"strings"
 )
 
-// WebhookConstructRule Keep compatible with Message
+// WebhookConstructRule 是 Webhook 的构建规则，即一个与 Message 字段一一对应的消息模板。
+//
+// 字段的值既可以是字符串，也可以是任意 JSON 结构（对象、数组等）：
+// 字符串会直接作为消息字段，其余结构会被序列化成 JSON 文本作为消息字段，
+// 因此可以用它构造飞书卡片一类的结构化消息内容。
 type WebhookConstructRule struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	URL         string `json:"url"`
+	Title       interface{} `json:"title"`
+	Description interface{} `json:"description"`
+	Content     interface{} `json:"content"`
+	URL         interface{} `json:"url"`
+}
+
+// WebhookConstructRuleString 把构建规则中的字段值转换为消息字段所需的字符串。
+func WebhookConstructRuleString(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
+}
+
+// RenderWebhookConstructRule 用提取出来的模板变量渲染构建规则。
+//
+// 变量替换发生在解析后的 JSON 结构上，而不是对 JSON 文本做字符串替换，
+// 因此变量值里含有引号、换行等特殊字符时不会破坏 JSON，
+// 并且嵌套在对象、数组中的变量同样会被替换。
+func RenderWebhookConstructRule(constructRule string, variables map[string]string) (*WebhookConstructRule, error) {
+	rule := &WebhookConstructRule{}
+	decoder := json.NewDecoder(strings.NewReader(constructRule))
+	// 用 json.Number 保留数字原本的写法，避免大整数被转成浮点数
+	decoder.UseNumber()
+	if err := decoder.Decode(rule); err != nil {
+		return nil, err
+	}
+	pairs := sortedWebhookVariables(variables)
+	rule.Title = replaceWebhookVariables(rule.Title, pairs)
+	rule.Description = replaceWebhookVariables(rule.Description, pairs)
+	rule.Content = replaceWebhookVariables(rule.Content, pairs)
+	rule.URL = replaceWebhookVariables(rule.URL, pairs)
+	return rule, nil
+}
+
+// sortedWebhookVariables 按变量名从长到短排序，避免 $title 误伤 $title_extra。
+func sortedWebhookVariables(variables map[string]string) [][2]string {
+	keys := make([]string, 0, len(variables))
+	for key := range variables {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] < keys[j]
+	})
+	pairs := make([][2]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, [2]string{"$" + key, variables[key]})
+	}
+	return pairs
+}
+
+// replaceWebhookVariables 递归地把字符串中的模板变量替换为其取值。
+func replaceWebhookVariables(value interface{}, pairs [][2]string) interface{} {
+	switch v := value.(type) {
+	case string:
+		for _, pair := range pairs {
+			v = strings.ReplaceAll(v, pair[0], pair[1])
+		}
+		return v
+	case map[string]interface{}:
+		for key, item := range v {
+			v[key] = replaceWebhookVariables(item, pairs)
+		}
+		return v
+	case []interface{}:
+		for i, item := range v {
+			v[i] = replaceWebhookVariables(item, pairs)
+		}
+		return v
+	default:
+		return value
+	}
 }
 
 type Webhook struct {

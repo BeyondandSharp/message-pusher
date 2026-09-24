@@ -8,9 +8,20 @@ RUN REACT_APP_VERSION=$(cat VERSION) yarn build
 
 FROM golang AS builder2
 
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+
 ENV GO111MODULE=on \
     CGO_ENABLED=1 \
     GOOS=linux
+
+# 把包管理器指向缓存代理（Debian 系基础镜像用 apt；APK_PROXY/APT_PROXY 为空时不做任何事）
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi; \
+    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
+    fi
 
 WORKDIR /build
 COPY . .
@@ -20,7 +31,13 @@ RUN go build -ldflags "-s -w -X 'message-pusher/common.Version=$(cat VERSION)' -
 
 FROM alpine
 
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+
 ENV PORT=3000
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi
 RUN apk update \
     && apk upgrade \
     && apk add --no-cache ca-certificates tzdata \

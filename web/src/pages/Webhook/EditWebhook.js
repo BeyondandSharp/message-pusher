@@ -155,7 +155,7 @@ const EditWebhook = () => {
           <Form.Group widths='equal'>
             <Form.TextArea
               label='构建规则'
-              placeholder='在此输入构建规则，不要改动 JSON 的键，只能改动值，值的部分可以引用模板变量，格式为 $VAR'
+              placeholder='在此输入构建规则，键为 title / description / content / url；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
               value={inputs.construct_rule}
               name='construct_rule'
               onChange={handleInputChange}

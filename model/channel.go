@@ -70,7 +70,7 @@ func GetChannelByName(name string, userId int) (*Channel, error) {
 }
 
 func GetTokenStoreChannels() (channels []*Channel, err error) {
-	err = DB.Where("type in ?", []string{TypeWeChatCorpAccount, TypeWeChatTestAccount, TypeLarkApp}).Find(&channels).Error
+	err = DB.Where("type in ?", []string{TypeWeChatCorpAccount, TypeWeChatTestAccount}).Find(&channels).Error
 	return channels, err
 }
 

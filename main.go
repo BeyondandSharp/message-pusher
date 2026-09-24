@@ -22,6 +22,7 @@ var buildFS embed.FS
 var indexPage []byte
 
 func main() {
+	common.InitFlags()
 	common.SetupGinLog()
 	common.SysLog("Message Pusher " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -61,7 +62,7 @@ func main() {
 	var store sessions.Store
 	if common.RedisEnabled {
 		opt := common.ParseRedisOption()
-		store, _ = redis.NewStore(opt.MinIdleConns, opt.Network, opt.Addr, opt.Password, []byte(common.SessionSecret))
+		store, _ = redis.NewStore(opt.MinIdleConns, opt.Network, opt.Addr, opt.Username, opt.Password, []byte(common.SessionSecret))
 	} else {
 		store = cookie.NewStore([]byte(common.SessionSecret))
 	}

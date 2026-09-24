@@ -4,3 +4,5 @@ upload
 *.exe
 *.db
 build
+node_modules
+dist

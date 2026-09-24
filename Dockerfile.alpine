@@ -1,0 +1,101 @@
+# 全 Alpine 一体化构建：前端（Node/Alpine）和后端（Go/Alpine）都在容器内完成，
+# 宿主机只需要有 docker，不需要本机安装 pnpm / node / go。
+#
+# 用法见同目录的 build-image-alpine.sh。
+
+# ---------------------------------------------------------------- 前端
+FROM node:20-alpine AS frontend
+
+ARG VERSION=dev
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
+WORKDIR /build/web
+
+RUN npm install -g pnpm --registry=${NPM_REGISTRY}
+
+# 先只拷贝依赖清单，依赖没变时可以复用这一层缓存
+COPY web/package.json ./
+
+# pnpm 10+ 默认不执行依赖包自带的 build 脚本（core-js 等会因此报 ERR_PNPM_IGNORED_BUILDS），
+# 这些脚本对构建产物没有影响，用 --ignore-scripts 安装即可。
+# BuildKit 缓存挂载用于保留 pnpm store：重复构建和失败重试都不用重新下载。
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --ignore-scripts --registry=${NPM_REGISTRY}
+
+COPY web/ ./
+
+# DISABLE_ESLINT_PLUGIN：pnpm 的严格依赖布局下 eslint-config-react-app 解析不到 jest/globals，
+# CRA 的 eslint 步骤会直接失败；跳过它不影响产物。
+# CI=""：避免 CRA 把 eslint 警告当成错误。
+RUN CI="" DISABLE_ESLINT_PLUGIN=true REACT_APP_VERSION="${VERSION}" pnpm run build
+
+# ---------------------------------------------------------------- 后端
+FROM golang:1.26-alpine AS backend
+
+ARG VERSION=dev
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+
+ENV GO111MODULE=on \
+    CGO_ENABLED=1 \
+    GOOS=linux \
+    GOPROXY=${GOPROXY}
+
+WORKDIR /build
+
+# 把包管理器指向缓存代理：Alpine 改写 /etc/apk/repositories，Debian 系写 apt 的 http 代理配置。
+# 这类代理（如 soulteary/apt-proxy）是把上游域名拼进 path 的反向代理，不是通用前向代理，
+# 而且 Alpine 默认仓库是 https（前向代理不支持 CONNECT），所以必须改写仓库地址。
+# APK_PROXY / APT_PROXY 为空时这一步不做任何事。
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi; \
+    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
+    fi
+
+# go-sqlite3 依赖 CGO，alpine 下需要 gcc 等工具链
+RUN apk add --no-cache build-base
+
+# 依赖单独一层：go.mod / go.sum 不变时可以复用构建缓存；
+# 缓存挂载让已下载的模块在重复构建/失败重试之间保留下来。
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+# main.go 里的 //go:embed web/build 需要前端产物
+COPY --from=frontend /build/web/build ./web/build
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
+
+# ---------------------------------------------------------------- 运行时
+FROM alpine:3.20
+
+ARG VERSION=dev
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+LABEL org.opencontainers.image.title="message-pusher" \
+      org.opencontainers.image.version="${VERSION}"
+
+ENV PORT=3000 \
+    TZ=Asia/Shanghai
+
+# 同构建阶段：让运行时的包安装也走缓存代理
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi; \
+    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
+    fi
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=backend /build/message-pusher /
+EXPOSE 3000
+WORKDIR /data
+ENTRYPOINT ["/message-pusher"]

@@ -43,12 +43,6 @@ func channel2item(channel_ *model.Channel) TokenStoreItem {
 			AgentId:     agentId,
 		}
 		return item
-	case model.TypeLarkApp:
-		item := &LarkAppTokenStoreItem{
-			AppID:     channel_.AppId,
-			AppSecret: channel_.Secret,
-		}
-		return item
 	}
 	return nil
 }
@@ -154,7 +148,7 @@ func TokenStoreRemoveUser(user *model.User) {
 }
 
 func checkTokenStoreChannelType(channelType string) bool {
-	return channelType == model.TypeWeChatTestAccount || channelType == model.TypeWeChatCorpAccount || channelType == model.TypeLarkApp
+	return channelType == model.TypeWeChatTestAccount || channelType == model.TypeWeChatCorpAccount
 }
 
 func TokenStoreAddChannel(channel *model.Channel) {

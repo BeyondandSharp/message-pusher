@@ -120,6 +120,38 @@ sudo certbot --nginx
 sudo service nginx restart
 ```
 
+### 本地构建镜像
+如果你修改了代码，想自己构建镜像并导出成可以直接导入 Docker 的镜像文件，可以直接运行仓库根目录的 `build-image.sh`：
+
+```shell
+./build-image.sh                          # 生成 dist/message-pusher-<版本>-<架构>.tar
+./build-image.sh message-pusher:mybuild   # 指定镜像名
+./build-image.sh --skip-frontend          # 复用已有的 web/build，不重新构建前端
+GOPROXY=https://goproxy.cn,direct ./build-image.sh   # 指定 Go 模块代理
+```
+
+脚本会依次用 pnpm 构建前端、用 `Dockerfile.local` 在容器里编译后端、最后 `docker save` 出镜像文件。
+在目标机器上导入并运行：
+
+```shell
+docker load -i dist/message-pusher-<版本>-<架构>.tar
+docker run -d --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v "$(pwd)/data:/data" message-pusher:<版本>
+```
+
+依赖：本机需要有 `pnpm` 和 `docker`。
+
+如果本机不想装 `pnpm`/`node`/`go`，可以改用全 Alpine 一体化构建，前端和后端都在容器内编译，**只需要本机有 docker**：
+
+```shell
+./build-image-alpine.sh                          # 生成 dist/message-pusher-<版本>-<架构>.tar
+./build-image-alpine.sh message-pusher:mybuild   # 指定镜像名
+./build-image-alpine.sh --no-save                # 只构建镜像，不导出 tar
+GOPROXY=https://goproxy.cn,direct ./build-image-alpine.sh   # 指定 Go 模块代理
+```
+
+该脚本使用 `Dockerfile.alpine`（`node:*-alpine` 构建前端 → `golang:*-alpine` 编译后端 → `alpine` 运行时），
+代价是每次构建都要在容器里重装一遍前端依赖，比复用本机 `web/node_modules` 的 `build-image.sh` 慢。
+
 ### 手动部署
 1. 从 [GitHub Releases](https://github.com/songquanpeng/message-pusher/releases/latest) 下载可执行文件或者从源码编译：
    ```shell
@@ -202,7 +234,7 @@ proxy_send_timeout 300s;
       1. `email`：通过发送邮件的方式进行推送（使用 `title` 或 `description` 字段设置邮件主题，使用 `content` 字段设置正文，支持完整的 Markdown 语法）。
       2. `test`：通过微信测试号进行推送（使用 `description` 字段设置模板消息内容，不支持 Markdown）。
       3. `corp_app`：通过企业微信应用号进行推送（仅当使用企业微信 APP 时，如果设置了 `content` 字段，`title` 和 `description` 字段会被忽略；使用微信中的企业微信插件时正常）。
-      4. `lark_app`：通过飞书自建应用进行推送。
+      4. `lark_app`：通过飞书自建应用进行推送（支持 `msg_type` 指定消息类型，详见下方《飞书消息类型》）。
       5. `corp`：通过企业微信群机器人推送（设置 `content` 字段则将渲染 Markdown 消息，支持 Markdown 的子集；设置 `description` 字段则为普通文本消息）。
       6. `lark`：通过飞书群机器人进行推送（注意事项同上）。
       7. `ding`：通过钉钉群机器人进行推送（注意事项同上）。
@@ -226,6 +258,7 @@ proxy_send_timeout 300s;
       1. 如果设置为 `code`，则消息体会被自动嵌套在代码块中进行渲染；
       2. 如果设置为 `raw`，则不进行 Markdown 解析；
       3. 默认 `markdown`，即进行 Markdown 解析。
+   10. `msg_type`：选填，目前仅对 `lark_app`（飞书自建应用）生效，用于指定飞书的消息类型，取值与写法见下方《飞书消息类型》；不填时保持原有行为（`description` 作为文本消息，`content` 作为交互卡片）。
 3. `POST` 请求方式：字段与上面 `GET` 请求方式保持一致。
    + 如果发送的是 JSON，HTTP Header `Content-Type` 请务必设置为 `application/json`，否则一律按 Form 处理。
    + POST 请求方式下的 `token` 字段也可以通过 URL 查询参数进行设置。
@@ -251,6 +284,29 @@ proxy_send_timeout 300s;
 注意：
 1. 对于大部分通道，`description` 字段和 `content` 是不能同时存在的，如果你只需要文字消息，请使用 `description` 字段，如果你需要发送 Markdown 消息，请使用 `content` 字段。
 2. 部分通道的 Markdown 支持实际上是通过 URL 跳转到本系统所渲染的消息详情实现的，其他通道的 Markdown 支持受限于具体的通道，支持的语法并不统一。
+
+**飞书消息类型（`msg_type`）：**
+
+`msg_type` 目前仅对 `lark_app`（飞书自建应用）生效，不填时保持原有行为。各取值与 `content` 的对应关系如下：
+
+|    `msg_type`     | 说明         | `content` 写法                                                                                                                              |
+|:-----------------:|:-----------|:------------------------------------------------------------------------------------------------------------------------------------------|
+|      `text`       | 文本消息       | 直接填写文本：优先使用 `description`，`description` 为空时使用 `content`                                                                                    |
+|      `post`       | 富文本消息      | 富文本 JSON，如 `{"zh_cn":{"title":"标题","content":[[{"tag":"text","text":"内容"}]]}}`；也接受 `{"post":{...}}` 以及省略 `zh_cn` 的简写                         |
+|   `interactive`   | 消息卡片       | 卡片 JSON，1.0 与 2.0 均可；如果不是合法的 JSON 对象，则将 `content` 作为 Markdown 自动生成卡片                                                                         |
+|      `image`      | 图片         | `image_key`，或 `{"image_key":"img_xxx"}`                                                                                                   |
+|   `share_chat`    | 分享群名片      | `chat_id`，或 `{"chat_id":"oc_xxx"}`                                                                                                        |
+|   `share_user`    | 分享个人名片     | `user_id`，或 `{"user_id":"ou_xxx"}`                                                                                                        |
+|      `audio`      | 语音         | `file_key`，或 `{"file_key":"file_xxx"}`                                                                                                    |
+|      `media`      | 视频         | `{"file_key":"file_xxx","image_key":"img_xxx"}`，其中 `image_key` 是视频封面，选填                                                                    |
+|      `file`       | 文件         | `file_key`，或 `{"file_key":"file_xxx"}`                                                                                                    |
+|     `sticker`     | 表情包        | `file_key`，或 `{"file_key":"file_xxx"}`                                                                                                    |
+
+补充说明：
+
+1. `image_key`、`file_key` 需要先调用飞书的[上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create)或[上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create)接口获取，本系统暂不代为上传。
+2. 在 `lark_app` 通道中，`to` 表示消息接收者（格式为 `类型:ID`），不再用于 @ 用户；如果需要 @ 用户，请在 `content` 中直接编写飞书的 at 标签。
+3. 如果 `msg_type` 是上表之外的未知类型，当 `content` 是合法的 JSON 对象时会原样透传，否则返回错误。
 
 **示例：**
 

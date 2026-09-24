@@ -1,0 +1,64 @@
+# 本文件配合根目录的 build-image.sh 使用。
+#
+# 与根目录的 Dockerfile 的区别：前端由本机 pnpm 预先构建到 web/build，
+# 这里只负责在容器内编译 Go 后端并组装最终镜像。
+# 直接 docker build 本文件前，请先确保 web/build/index.html 已存在。
+FROM golang:1.26-alpine AS builder
+
+ARG VERSION=dev
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+
+ENV GO111MODULE=on \
+    CGO_ENABLED=1 \
+    GOOS=linux \
+    GOPROXY=${GOPROXY}
+
+WORKDIR /build
+
+# 把包管理器指向缓存代理：Alpine 改写 /etc/apk/repositories，Debian 系写 apt 的 http 代理配置。
+# 这类代理（如 soulteary/apt-proxy）是把上游域名拼进 path 的反向代理，不是通用前向代理，
+# 而且 Alpine 默认仓库是 https（前向代理不支持 CONNECT），所以必须改写仓库地址。
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi; \
+    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
+    fi
+
+# go-sqlite3 依赖 CGO，alpine 下需要 gcc 等工具链
+RUN apk add --no-cache build-base
+
+# 依赖单独一层：go.mod / go.sum 不变时可以复用构建缓存
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
+
+FROM alpine:3.20
+
+ARG VERSION=dev
+ARG APK_PROXY=""
+ARG APT_PROXY=""
+LABEL org.opencontainers.image.title="message-pusher" \
+      org.opencontainers.image.version="${VERSION}"
+
+ENV PORT=3000 \
+    TZ=Asia/Shanghai
+
+# 同构建阶段：让运行时的包安装也走缓存代理
+RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
+      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
+    fi; \
+    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
+    fi
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /build/message-pusher /
+EXPOSE 3000
+WORKDIR /data
+ENTRYPOINT ["/message-pusher"]

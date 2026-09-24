@@ -234,29 +234,28 @@ func TriggerWebhook(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Webhook 提取规则解析失败",
+			"message": "Webhook 提取规则解析失败：" + err.Error(),
 		})
 		return
 	}
+	variables := make(map[string]string, len(extractRule))
 	for key, value := range extractRule {
-		variableValue := gjson.Get(reqText, value).String()
-		webhook.ConstructRule = common.Replace(webhook.ConstructRule, "$"+key, variableValue, -1)
+		variables[key] = gjson.Get(reqText, value).String()
 	}
-	constructRule := model.WebhookConstructRule{}
-	err = json.Unmarshal([]byte(webhook.ConstructRule), &constructRule)
+	constructRule, err := model.RenderWebhookConstructRule(webhook.ConstructRule, variables)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "Webhook 构建规则解析失败",
+			"message": "Webhook 构建规则解析失败：" + err.Error(),
 		})
 		return
 	}
 	message := &model.Message{
 		Channel:     webhook.Channel,
-		Title:       constructRule.Title,
-		Description: constructRule.Description,
-		Content:     constructRule.Content,
-		URL:         constructRule.URL,
+		Title:       model.WebhookConstructRuleString(constructRule.Title),
+		Description: model.WebhookConstructRuleString(constructRule.Description),
+		Content:     model.WebhookConstructRuleString(constructRule.Content),
+		URL:         model.WebhookConstructRuleString(constructRule.URL),
 	}
 	processMessage(c, message, user, false)
 }

@@ -644,6 +644,10 @@ const EditChannel = () => {
                 开发文档
               </a>
               中查询参数一节。
+              <br />
+              推送时可通过 <code>msg_type</code> 参数指定消息类型（text、post、image、
+              interactive、share_chat、share_user、audio、media、file、sticker），
+              不填时 <code>description</code> 为文本消息、<code>content</code> 为交互卡片。
             </Message>
             <Form.Group widths={3}>
               <Form.Input

@@ -4,6 +4,18 @@ import { useParams } from 'react-router-dom';
 import { API, showError, showSuccess } from '../../helpers';
 import { loadUser, loadUserChannels } from '../../helpers/loader';
 
+const JSON_MSG_TYPE_OPTIONS = [
+  { key: 'interactive', text: '消息卡片 interactive', value: 'interactive' },
+  { key: 'post', text: '富文本 post', value: 'post' },
+  { key: 'image', text: '图片 image', value: 'image' },
+  { key: 'share_chat', text: '群名片 share_chat', value: 'share_chat' },
+  { key: 'share_user', text: '个人名片 share_user', value: 'share_user' },
+  { key: 'audio', text: '语音 audio', value: 'audio' },
+  { key: 'media', text: '视频 media', value: 'media' },
+  { key: 'file', text: '文件 file', value: 'file' },
+  { key: 'sticker', text: '表情包 sticker', value: 'sticker' },
+];
+
 const EditMessage = () => {
   const params = useParams();
   const messageId = params.id;
@@ -16,6 +28,7 @@ const EditMessage = () => {
   });
   let [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(isEditing);
+  const [jsonMode, setJsonMode] = useState(false);
   const originInputs = {
     title: '',
     description: '',
@@ -24,6 +37,7 @@ const EditMessage = () => {
     channel: localStorage.getItem('editor_channel') || '',
     to: '',
     async: false,
+    msg_type: '',
   };
 
   const [inputs, setInputs] = useState(originInputs);
@@ -36,12 +50,21 @@ const EditMessage = () => {
     }
   };
 
+  const handleJsonModeChange = (checked) => {
+    setJsonMode(checked);
+    handleInputChange(null, {
+      name: 'msg_type',
+      value: checked ? inputs.msg_type || 'interactive' : '',
+    });
+  };
+
   const loadMessage = async () => {
     let res = await API.get(`/api/message/${messageId}`);
     const { success, message, data } = res.data;
     if (success) {
       data.id = 0;
       setInputs(data);
+      setJsonMode(!!data.msg_type);
     } else {
       showError(message);
     }
@@ -67,8 +90,28 @@ const EditMessage = () => {
 
   const send = async () => {
     if (!description && !content) return;
+    let msgContent = content;
+    if (jsonMode) {
+      msgContent = (content || '').trim();
+      if (msgContent === '') {
+        showError('JSON 内容不能为空！');
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(msgContent);
+      } catch (e) {
+        showError('JSON 解析失败：' + e.message);
+        return;
+      }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        showError('JSON 内容必须是一个对象，例如 {"image_key":"img_xxx"}');
+        return;
+      }
+    }
     let res = await API.post(`/push/${user.username}/`, {
       ...inputs,
+      content: msgContent,
       token: user.token,
     });
     const { success, message } = res.data;
@@ -78,6 +121,7 @@ const EditMessage = () => {
       } else {
         showSuccess('消息发送成功！');
         setInputs(originInputs);
+        setJsonMode(false);
       }
     } else {
       showError(message);
@@ -125,12 +169,33 @@ const EditMessage = () => {
           <Form.Group widths='equal'>
             <Form.TextArea
               label='内容'
-              placeholder='请输入消息内容'
+              placeholder={
+                jsonMode
+                  ? '请输入 JSON 内容，例如 {"image_key":"img_xxx"}'
+                  : '请输入消息内容'
+              }
               value={inputs.content}
               name='content'
               onChange={handleInputChange}
               style={{ minHeight: 200, fontFamily: 'JetBrains Mono, Consolas' }}
             />
+          </Form.Group>
+          <Form.Group widths='equal'>
+            <Form.Checkbox
+              label='内容为 JSON（直接填写要发送的 content）'
+              checked={jsonMode}
+              onChange={(e, { checked }) => handleJsonModeChange(checked)}
+            />
+            {jsonMode && (
+              <Form.Select
+                label='消息类型（目前仅 lark_app 生效）'
+                placeholder='请选择消息类型'
+                name='msg_type'
+                options={JSON_MSG_TYPE_OPTIONS}
+                value={inputs.msg_type}
+                onChange={handleInputChange}
+              />
+            )}
           </Form.Group>
           <Form.Group widths='equal'>
             <Form.Input

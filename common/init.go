@@ -30,7 +30,10 @@ func printHelp() {
 	os.Exit(0)
 }
 
-func init() {
+// InitFlags 解析命令行参数并处理其副作用，必须由 main() 在所有初始化之前调用。
+// 注意：不要把它写成 init()，否则在 go test 环境下，flag.Parse 会先于 testing 包注册
+// 自己的标志（如 -test.timeout）执行，导致测试二进制作何 go test 都无法启动。
+func InitFlags() {
 	flag.Parse()
 
 	if *PrintVersion {

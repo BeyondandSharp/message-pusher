@@ -41,6 +41,7 @@ func GetPushMessage(c *gin.Context) {
 		OpenId:      c.Query("openid"),
 		Async:       c.Query("async") == "true",
 		RenderMode:  c.Query("render_mode"),
+		MsgType:     c.Query("msg_type"),
 	}
 	keepCompatible(&message)
 	pushMessageHelper(c, &message)
@@ -73,6 +74,7 @@ func PostPushMessage(c *gin.Context) {
 			OpenId:      c.PostForm("openid"),
 			Async:       c.PostForm("async") == "true",
 			RenderMode:  c.PostForm("render_mode"),
+			MsgType:     c.PostForm("msg_type"),
 		}
 	}
 	if message == (model.Message{}) {
@@ -165,7 +167,9 @@ func processMessage(c *gin.Context, message *model.Message, user *model.User, ne
 		})
 		return
 	}
-	if message.RenderMode == "code" {
+	// msg_type 为 text 之外的结构化类型时，content 是 JSON，不能再包进代码块
+	msgType := strings.ToLower(strings.TrimSpace(message.MsgType))
+	if message.RenderMode == "code" && (msgType == "" || msgType == "text") {
 		if message.Content != "" {
 			message.Content = fmt.Sprintf("```\n%s\n```", message.Content)
 		}

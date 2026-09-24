@@ -18,13 +18,14 @@ type Message struct {
 	HTMLContent string `json:"html_content"  gorm:"-:all"`
 	Timestamp   int64  `json:"timestamp" gorm:"type:bigint"`
 	Link        string `json:"link" gorm:"unique;index"`
-	To          string `json:"to" gorm:"column:to"`           // if specified, will send to this user(s)
-	Status      int    `json:"status" gorm:"default:0;index"` // pending, sent, failed
-	OpenId      string `json:"openid" gorm:"-:all"`           // alias for to
-	Desp        string `json:"desp" gorm:"-:all"`             // alias for content
-	Short       string `json:"short" gorm:"-:all"`            // alias for description
-	Async       bool   `json:"async" gorm:"-"`                // if true, will send message asynchronously
-	RenderMode  string `json:"render_mode" gorm:"raw"`        // markdown (default), code, raw
+	To          string `json:"to" gorm:"column:to"`             // if specified, will send to this user(s)
+	Status      int    `json:"status" gorm:"default:0;index"`   // pending, sent, failed
+	OpenId      string `json:"openid" gorm:"-:all"`             // alias for to
+	Desp        string `json:"desp" gorm:"-:all"`               // alias for content
+	Short       string `json:"short" gorm:"-:all"`              // alias for description
+	Async       bool   `json:"async" gorm:"-"`                  // if true, will send message asynchronously
+	RenderMode  string `json:"render_mode" gorm:"raw"`          // markdown (default), code, raw
+	MsgType     string `json:"msg_type" gorm:"column:msg_type"` // message type, currently only used by lark_app
 }
 
 func GetMessageByIds(id int, userId int) (*Message, error) {
