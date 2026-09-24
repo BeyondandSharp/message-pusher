@@ -135,13 +135,9 @@ const LoginForm = () => {
           title={
             <>
               忘记密码？
-              <Link to='/reset' className='btn btn-link'>
-                点击重置
-              </Link>
+              <Link to='/reset'>点击重置</Link>
               ； 没有账户？
-              <Link to='/register' className='btn btn-link'>
-                点击注册
-              </Link>
+              <Link to='/register'>点击注册</Link>
             </>
           }
         />

@@ -8,7 +8,6 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import ToastBridge from './components/ToastBridge';
 import 'antd/dist/reset.css';
-import 'semantic-ui-css/semantic.min.css';
 import './index.css';
 import { UserProvider } from './context/User';
 import { StatusProvider } from './context/Status';

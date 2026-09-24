@@ -185,9 +185,7 @@ const RegisterForm = () => {
           title={
             <>
               已有账户？
-              <Link to='/login' className='btn btn-link'>
-                点击登录
-              </Link>
+              <Link to='/login'>点击登录</Link>
             </>
           }
         />
