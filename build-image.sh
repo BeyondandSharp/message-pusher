@@ -38,7 +38,7 @@ usage() {
   ./build-image.sh
   ./build-image.sh message-pusher:v1
   ./build-image.sh --skip-frontend --no-save
-  GOPROXY=https://goproxy.cn,direct ./build-image.sh
+  APK_PROXY= GOPROXY= ./build-image.sh          # 不用局域网缓存代理，走公网默认源
 EOF
   exit "${1:-0}"
 }

@@ -38,7 +38,8 @@ usage() {
   ./build-image-alpine.sh
   ./build-image-alpine.sh message-pusher:v1
   ./build-image-alpine.sh --no-save
-  GOPROXY=https://goproxy.cn,direct ./build-image-alpine.sh
+  NPM_REGISTRY=https://registry.npmmirror.com ./build-image-alpine.sh
+  APK_PROXY= GOPROXY= ./build-image-alpine.sh    # 不用局域网缓存代理，走公网默认源
 EOF
   exit "${1:-0}"
 }
