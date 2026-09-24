@@ -12,6 +12,7 @@ import {
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import {
   API,
+  isRateLimited,
   openPage,
   showError,
   showInfo,
@@ -23,6 +24,10 @@ import { ITEMS_PER_PAGE } from '../constants';
 import { renderTimestamp } from '../helpers/render';
 import { Link } from 'react-router-dom';
 import { marked } from 'marked';
+
+// 列表自动刷新的间隔（秒）。默认 60 秒：消息推送流（SSE）已经能实时推新消息，
+// 原来的 10 秒一次在服务端 60 次/3 分钟的限流下（多标签页时）很容易触发 429。
+const AUTO_REFRESH_SECONDS = 60;
 
 function renderStatus(status) {
   switch (status) {
@@ -63,7 +68,8 @@ const MessagesTable = () => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(10);
+  const [autoRefreshSeconds, setAutoRefreshSeconds] =
+    useState(AUTO_REFRESH_SECONDS);
   const autoRefreshSecondsRef = useRef(autoRefreshSeconds);
   const [activePage, setActivePage] = useState(1);
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -299,9 +305,15 @@ const MessagesTable = () => {
     if (autoRefresh) {
       intervalId = setInterval(() => {
         if (autoRefreshSecondsRef.current === 0) {
+          if (isRateLimited()) {
+            // 服务端正在限流（429）：别再继续加压，直接等服务端限流窗口过去
+            autoRefreshSecondsRef.current = AUTO_REFRESH_SECONDS;
+            setAutoRefreshSeconds(AUTO_REFRESH_SECONDS);
+            return;
+          }
           refresh().then();
-          setAutoRefreshSeconds(10);
-          autoRefreshSecondsRef.current = 10;
+          setAutoRefreshSeconds(AUTO_REFRESH_SECONDS);
+          autoRefreshSecondsRef.current = AUTO_REFRESH_SECONDS;
         } else {
           autoRefreshSecondsRef.current -= 1;
           setAutoRefreshSeconds((autoRefreshSeconds) => autoRefreshSeconds - 1); // Important!
@@ -469,7 +481,7 @@ const MessagesTable = () => {
             loading={loading}
             onClick={() => {
               setAutoRefresh(!autoRefresh);
-              setAutoRefreshSeconds(10);
+              setAutoRefreshSeconds(AUTO_REFRESH_SECONDS);
             }}
           >
             {autoRefresh

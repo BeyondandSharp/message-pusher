@@ -62,6 +62,12 @@ const showInfoDuration = toastConstants.INFO_TIMEOUT / 1000;
 const showNoticeDuration = 0;
 
 export function showError(error) {
+  // 拦截器已经在请求失败时提示过一次，并返回 success: false 的占位响应；
+  // 调用方的失败分支常常再 showError(message)，此时 message 为空，直接忽略，
+  // 免得出现「错误：undefined」这类无意义提示。
+  if (!error) {
+    return;
+  }
   console.error(error);
   const { notification } = getToastApi();
   if (error.message) {

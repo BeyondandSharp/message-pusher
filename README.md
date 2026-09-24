@@ -89,6 +89,21 @@ Nginx 的参考配置：
 server{
    server_name your-domain.com;  # 请根据实际情况修改你的域名
    
+   # 消息推送流（SSE，/api/message/stream）必须关闭缓冲：
+   # Nginx 默认会缓冲上游响应，被缓冲住的 SSE 前端一直收不到推送，
+   # 连接超时后前端会不断重连（进而是无谓的请求量），消息页只能靠轮询。
+   location /api/message/stream {
+          proxy_pass http://localhost:3000;  # 请根据实际情况修改你的端口
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Connection '';
+          proxy_buffering off;
+          proxy_cache off;
+          proxy_read_timeout 3600s;
+          chunked_transfer_encoding off;
+   }
+   
    location / {
           client_max_body_size  64m;
           proxy_http_version 1.1;
@@ -96,7 +111,6 @@ server{
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-For $remote_addr;
           proxy_cache_bypass $http_upgrade;
-          proxy_set_header Accept-Encoding gzip;
    }
 }
 ```
