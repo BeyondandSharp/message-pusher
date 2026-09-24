@@ -1,6 +1,7 @@
 body {
   margin: 0;
-  padding-top: 55px;
+  /* 给固定在顶部的 Header 预留高度：52px 内容 + 1px 下边框（见 components/Header.jsx） */
+  padding-top: 53px;
   overflow-y: scroll;
   font-family:
     Lato, 'Helvetica Neue', Arial, Helvetica, 'Microsoft YaHei', sans-serif;

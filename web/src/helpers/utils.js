@@ -63,7 +63,7 @@ const showNoticeDuration = 0;
 
 export function showError(error) {
   console.error(error);
-  const { message } = getToastApi();
+  const { notification } = getToastApi();
   if (error.message) {
     if (error.name === 'AxiosError') {
       switch (error.response?.status) {
@@ -72,64 +72,64 @@ export function showError(error) {
           window.location.href = '/login?expired=true';
           break;
         case 429:
-          message.error({
-            content: '错误：请求次数过多，请稍后再试！',
+          notification.error({
+            message: '错误：请求次数过多，请稍后再试！',
             duration: showErrorDuration,
           });
           break;
         case 500:
-          message.error({
-            content: '错误：服务器内部错误，请联系管理员！',
+          notification.error({
+            message: '错误：服务器内部错误，请联系管理员！',
             duration: showErrorDuration,
           });
           break;
         case 405:
-          message.info('本站仅作演示之用，无服务端！');
+          notification.info({ message: '本站仅作演示之用，无服务端！' });
           break;
         default:
-          message.error({
-            content: '错误：' + error.message,
+          notification.error({
+            message: '错误：' + error.message,
             duration: showErrorDuration,
           });
       }
       return;
     }
-    message.error({
-      content: '错误：' + error.message,
+    notification.error({
+      message: '错误：' + error.message,
       duration: showErrorDuration,
     });
   } else {
-    message.error({
-      content: '错误：' + error,
+    notification.error({
+      message: '错误：' + error,
       duration: showErrorDuration,
     });
   }
 }
 
-export function showWarning(message) {
-  getToastApi().message.warning({
-    content: message,
+export function showWarning(text) {
+  getToastApi().notification.warning({
+    message: text,
     duration: showWarningDuration,
   });
 }
 
-export function showSuccess(message) {
-  getToastApi().message.success({
-    content: message,
+export function showSuccess(text) {
+  getToastApi().notification.success({
+    message: text,
     duration: showSuccessDuration,
   });
 }
 
-export function showInfo(message) {
-  getToastApi().message.info({
-    content: message,
+export function showInfo(text) {
+  getToastApi().notification.info({
+    message: text,
     duration: showInfoDuration,
   });
 }
 
-export function showNotice(message) {
-  getToastApi().message.info({
-    content: message,
+export function showNotice(text) {
+  getToastApi().notification.info({
+    message: text,
     duration: showNoticeDuration,
   });
 }

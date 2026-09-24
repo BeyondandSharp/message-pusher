@@ -71,6 +71,14 @@ const containerStyle = {
 };
 
 const headerStyle = {
+  // 固定在页面顶部（index.css 里 body 预留了同等高度的 padding-top）。
+  // 之前在文档流里，加上 body 的 padding-top 就变成顶部一条空白，看起来没贴顶。
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  zIndex: 100,
+  width: '100%',
   background: '#fff',
   borderBottom: '1px solid #f0f0f0',
   padding: 0,
