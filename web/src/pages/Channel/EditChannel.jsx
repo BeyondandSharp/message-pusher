@@ -95,7 +95,7 @@ const EditChannel = () => {
           }
         } else if (channels.length !== targets.length) {
           showError(
-            '群组通道的子通道数量与目标数量不匹配，对于不需要指定的目标请直接留空'
+            '群组通道的子通道数量与目标数量不匹配，对于不需要指定的目标请直接留空',
           );
           return;
         }
@@ -140,7 +140,7 @@ const EditChannel = () => {
       return;
     }
     let res = await axios.get(
-      `https://api.telegram.org/bot${inputs.secret}/getUpdates`
+      `https://api.telegram.org/bot${inputs.secret}/getUpdates`,
     );
     const { ok } = res.data;
     if (ok) {
@@ -300,9 +300,9 @@ const EditChannel = () => {
               。
               <br />
               <br />
-              注意，企业微信要求配置可信 IP，步骤：应用管理 -&gt; 自建 -&gt; 创建应用
-              -&gt; 应用设置页面下拉中找到「企业可信 IP」，点击配置 -&gt; 设置可信域名
-              -&gt; 在「可调用
+              注意，企业微信要求配置可信 IP，步骤：应用管理 -&gt; 自建 -&gt;
+              创建应用 -&gt; 应用设置页面下拉中找到「企业可信 IP」，点击配置
+              -&gt; 设置可信域名 -&gt; 在「可调用
               JS-SDK、跳转小程序的可信域名」下面填写一个域名，然后点击「申请校验域名」，根据提示完成校验
               -&gt; 之后填写服务器 IP 地址（此 IP
               地址是消息推送服务所部署在的服务器的 IP
@@ -364,9 +364,9 @@ const EditChannel = () => {
         return (
           <>
             <Alert>
-              通过企业微信群机器人进行推送，配置流程：选择一个群聊 -&gt; 设置 -&gt;
-              群机器人 -&gt; 添加 -&gt; 新建 -&gt; 输入名字，点击添加 -&gt; 点击复制 Webhook
-              地址
+              通过企业微信群机器人进行推送，配置流程：选择一个群聊 -&gt; 设置
+              -&gt; 群机器人 -&gt; 添加 -&gt; 新建 -&gt; 输入名字，点击添加
+              -&gt; 点击复制 Webhook 地址
             </Alert>
             <FormGroup>
               <Form.Item label='Webhook 地址'>
@@ -386,7 +386,8 @@ const EditChannel = () => {
           <>
             <Alert>
               通过飞书群机器人进行推送，飞书桌面客户端的配置流程：选择一个群聊
-              -&gt; 设置 -&gt; 群机器人 -&gt; 添加机器人 -&gt; 自定义机器人 -&gt; 添加（
+              -&gt; 设置 -&gt; 群机器人 -&gt; 添加机器人 -&gt; 自定义机器人
+              -&gt; 添加（
               <strong>注意选中「签名校验」</strong>）。具体参见：
               <a
                 target='_blank'
@@ -422,8 +423,8 @@ const EditChannel = () => {
           <>
             <Alert>
               通过钉钉群机器人进行推送，钉钉桌面客户端的配置流程：选择一个群聊
-              -&gt; 群设置 -&gt; 智能群助手 -&gt; 添加机器人（点击右侧齿轮图标） -&gt;
-              自定义 -&gt; 添加（
+              -&gt; 群设置 -&gt; 智能群助手 -&gt; 添加机器人（点击右侧齿轮图标）
+              -&gt; 自定义 -&gt; 添加（
               <strong>注意选中「加密」</strong>）。具体参见：
               <a
                 target='_blank'
@@ -554,8 +555,8 @@ const EditChannel = () => {
         return (
           <>
             <Alert>
-              通过 Discord 群机器人进行推送，配置流程：选择一个 channel -&gt; 设置
-              -&gt; 整合 -&gt; 创建 Webhook -&gt; 点击复制 Webhook URL
+              通过 Discord 群机器人进行推送，配置流程：选择一个 channel -&gt;
+              设置 -&gt; 整合 -&gt; 创建 Webhook -&gt; 点击复制 Webhook URL
             </Alert>
             <FormGroup>
               <Form.Item label='Webhook 地址'>
@@ -675,9 +676,11 @@ const EditChannel = () => {
               </a>
               中查询参数一节。
               <br />
-              推送时可通过 <code>msg_type</code> 参数指定消息类型（text、post、image、
+              推送时可通过 <code>msg_type</code>{' '}
+              参数指定消息类型（text、post、image、
               interactive、share_chat、share_user、audio、media、file、sticker），
-              不填时 <code>description</code> 为文本消息、<code>content</code> 为交互卡片。
+              不填时 <code>description</code> 为文本消息、<code>content</code>{' '}
+              为交互卡片。
             </Alert>
             <FormGroup>
               <Form.Item label='App ID'>

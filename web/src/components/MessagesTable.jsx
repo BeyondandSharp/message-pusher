@@ -392,10 +392,7 @@ const MessagesTable = () => {
       <Table
         columns={columns}
         dataSource={messages
-          .slice(
-            (activePage - 1) * ITEMS_PER_PAGE,
-            activePage * ITEMS_PER_PAGE
-          )
+          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
           .filter((message) => !message.deleted)}
         rowKey='id'
         pagination={false}

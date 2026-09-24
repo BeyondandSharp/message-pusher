@@ -58,7 +58,7 @@ const PersonalSetting = () => {
   const bindWeChat = async () => {
     if (inputs.wechat_verification_code === '') return;
     const res = await API.get(
-      `/api/oauth/wechat/bind?code=${inputs.wechat_verification_code}`
+      `/api/oauth/wechat/bind?code=${inputs.wechat_verification_code}`,
     );
     const { success, message } = res.data;
     if (success) {
@@ -71,7 +71,7 @@ const PersonalSetting = () => {
 
   const openGitHubOAuth = () => {
     window.open(
-      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`
+      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`,
     );
   };
 
@@ -83,7 +83,7 @@ const PersonalSetting = () => {
     }
     setLoading(true);
     const res = await API.get(
-      `/api/verification?email=${inputs.email}&turnstile=${turnstileToken}`
+      `/api/verification?email=${inputs.email}&turnstile=${turnstileToken}`,
     );
     const { success, message } = res.data;
     if (success) {
@@ -98,7 +98,7 @@ const PersonalSetting = () => {
     if (inputs.email_verification_code === '') return;
     setLoading(true);
     const res = await API.get(
-      `/api/oauth/email/bind?email=${inputs.email}&code=${inputs.email_verification_code}`
+      `/api/oauth/email/bind?email=${inputs.email}&code=${inputs.email_verification_code}`,
     );
     const { success, message } = res.data;
     if (success) {

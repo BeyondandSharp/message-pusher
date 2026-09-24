@@ -34,5 +34,5 @@ root.render(
         </StatusProvider>
       </AntdApp>
     </ConfigProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

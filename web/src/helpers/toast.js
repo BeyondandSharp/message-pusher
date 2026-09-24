@@ -1,4 +1,7 @@
-import { message as staticMessage, notification as staticNotification } from 'antd';
+import {
+  message as staticMessage,
+  notification as staticNotification,
+} from 'antd';
 
 // antd 的 message/notification 需要处在 React 上下文里，才能拿到 ConfigProvider 的主题与语言配置。
 // 但 showError 这类函数会被 axios 响应拦截器这种「非组件」代码调用，拿不到 hook，

@@ -250,7 +250,7 @@ const WebhooksTable = () => {
               onClick={() => {
                 manageWebhook(
                   webhook.id,
-                  webhook.status === 1 ? 'disable' : 'enable'
+                  webhook.status === 1 ? 'disable' : 'enable',
                 ).then();
               }}
             >

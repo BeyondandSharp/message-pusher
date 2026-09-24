@@ -37,7 +37,7 @@ const LoginForm = () => {
   const [status, setStatus] = useState({});
 
   useEffect(() => {
-    if (searchParams.get("expired")) {
+    if (searchParams.get('expired')) {
       showError('未登录或登录已过期，请重新登录！');
     }
     let status = localStorage.getItem('status');
@@ -51,7 +51,7 @@ const LoginForm = () => {
 
   const onGitHubOAuthClicked = () => {
     window.open(
-      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`
+      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`,
     );
   };
 
@@ -61,7 +61,7 @@ const LoginForm = () => {
 
   const onSubmitWeChatVerificationCode = async () => {
     const res = await API.get(
-      `/api/oauth/wechat?code=${inputs.wechat_verification_code}`
+      `/api/oauth/wechat?code=${inputs.wechat_verification_code}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -135,8 +135,7 @@ const LoginForm = () => {
           title={
             <>
               忘记密码？
-              <Link to='/reset'>点击重置</Link>
-              ； 没有账户？
+              <Link to='/reset'>点击重置</Link>； 没有账户？
               <Link to='/register'>点击注册</Link>
             </>
           }
@@ -175,9 +174,7 @@ const LoginForm = () => {
         >
           <Image src={status.wechat_qrcode} style={{ width: '100%' }} />
           <div style={{ textAlign: 'center' }}>
-            <p>
-              微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）
-            </p>
+            <p>微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）</p>
           </div>
           <Form size='large'>
             <Form.Item>

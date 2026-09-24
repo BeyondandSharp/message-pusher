@@ -27,9 +27,7 @@ const Footer = () => {
             JustSong
           </a>{' '}
           构建，源代码遵循{' '}
-          <a href='https://opensource.org/licenses/mit-license.php'>
-            MIT 协议
-          </a>
+          <a href='https://opensource.org/licenses/mit-license.php'>MIT 协议</a>
         </div>
       ) : (
         <div

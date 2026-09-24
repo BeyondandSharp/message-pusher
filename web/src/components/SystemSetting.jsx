@@ -142,7 +142,7 @@ const SystemSetting = () => {
     if (originInputs['WeChatServerAddress'] !== inputs.WeChatServerAddress) {
       await updateOption(
         'WeChatServerAddress',
-        removeTrailingSlash(inputs.WeChatServerAddress)
+        removeTrailingSlash(inputs.WeChatServerAddress),
       );
     }
     if (
@@ -151,7 +151,7 @@ const SystemSetting = () => {
     ) {
       await updateOption(
         'WeChatAccountQRCodeImageURL',
-        inputs.WeChatAccountQRCodeImageURL
+        inputs.WeChatAccountQRCodeImageURL,
       );
     }
     if (

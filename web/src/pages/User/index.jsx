@@ -6,7 +6,7 @@ const User = () => (
   <>
     <Card>
       <Typography.Title level={3}>管理用户</Typography.Title>
-      <UsersTable/>
+      <UsersTable />
     </Card>
   </>
 );

@@ -245,7 +245,7 @@ const ChannelsTable = () => {
             onClick={() => {
               manageChannel(
                 channel.id,
-                channel.status === 1 ? 'disable' : 'enable'
+                channel.status === 1 ? 'disable' : 'enable',
               ).then();
             }}
           >

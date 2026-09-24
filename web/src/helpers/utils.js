@@ -19,31 +19,30 @@ export function isRoot() {
 export async function copy(text) {
   let okay = true;
   try {
-    if (navigator.clipboard){
+    if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
     } else {
-      var textarea = document.createElement("textarea");
+      var textarea = document.createElement('textarea');
 
       textarea.value = text;
 
       textarea.style.opacity = 0;
-      textarea.style.position = "absolute";
-      textarea.style.left = "-9999px";
+      textarea.style.position = 'absolute';
+      textarea.style.left = '-9999px';
 
       document.body.appendChild(textarea);
-      
+
       var range = document.createRange();
       range.selectNode(textarea);
       window.getSelection().removeAllRanges();
       window.getSelection().addRange(range);
-      
-      document.execCommand("copy");
-      
+
+      document.execCommand('copy');
+
       document.body.removeChild(textarea);
       window.getSelection().removeAllRanges();
     }
-  }
-   catch (e) {
+  } catch (e) {
     okay = false;
     console.error(e);
   }

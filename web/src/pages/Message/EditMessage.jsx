@@ -107,7 +107,11 @@ const EditMessage = () => {
         showError('JSON 解析失败：' + e.message);
         return;
       }
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      if (
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed)
+      ) {
         showError('JSON 内容必须是一个对象，例如 {"image_key":"img_xxx"}');
         return;
       }
@@ -186,7 +190,10 @@ const EditMessage = () => {
                 value={inputs.content}
                 name='content'
                 onChange={handleInputChange}
-                style={{ minHeight: 200, fontFamily: 'JetBrains Mono, Consolas' }}
+                style={{
+                  minHeight: 200,
+                  fontFamily: 'JetBrains Mono, Consolas',
+                }}
               />
             </Form.Item>
           </FormGroup>

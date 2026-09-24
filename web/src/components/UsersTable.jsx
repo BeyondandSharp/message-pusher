@@ -250,7 +250,7 @@ const UsersTable = () => {
               manageUser(
                 user.username,
                 user.status === 1 ? 'disable' : 'enable',
-                user
+                user,
               );
             }}
           >
@@ -285,7 +285,7 @@ const UsersTable = () => {
                     user.send_email_to_others === 1
                       ? 'disallow_send_email_to_others'
                       : 'allow_send_email_to_others',
-                    user
+                    user,
                   );
                 } else if (key === 'save_message_to_database') {
                   manageUser(
@@ -293,7 +293,7 @@ const UsersTable = () => {
                     user.save_message_to_database === 1
                       ? 'disallow_save_message_to_database'
                       : 'allow_save_message_to_database',
-                    user
+                    user,
                   );
                 }
               },
@@ -327,10 +327,7 @@ const UsersTable = () => {
       <Table
         columns={columns}
         dataSource={users
-          .slice(
-            (activePage - 1) * ITEMS_PER_PAGE,
-            activePage * ITEMS_PER_PAGE
-          )
+          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
           .filter((user) => !user.deleted)}
         rowKey='id'
         pagination={false}

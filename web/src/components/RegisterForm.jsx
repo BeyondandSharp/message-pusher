@@ -67,7 +67,7 @@ const RegisterForm = () => {
       setLoading(true);
       const res = await API.post(
         `/api/user/register?turnstile=${turnstileToken}`,
-        inputs
+        inputs,
       );
       const { success, message } = res.data;
       if (success) {
@@ -88,7 +88,7 @@ const RegisterForm = () => {
     }
     setLoading(true);
     const res = await API.get(
-      `/api/verification?email=${inputs.email}&turnstile=${turnstileToken}`
+      `/api/verification?email=${inputs.email}&turnstile=${turnstileToken}`,
     );
     const { success, message } = res.data;
     if (success) {

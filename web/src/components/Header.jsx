@@ -98,7 +98,7 @@ const Header = () => {
   };
 
   const visibleButtons = headerButtons.filter(
-    (button) => !(button.admin && !isAdmin())
+    (button) => !(button.admin && !isAdmin()),
   );
 
   const renderButtons = (mobile) => {
@@ -255,7 +255,10 @@ const Header = () => {
               </a>
             </Dropdown>
           ) : (
-            <Link to='/login' style={{ color: 'inherit', whiteSpace: 'nowrap' }}>
+            <Link
+              to='/login'
+              style={{ color: 'inherit', whiteSpace: 'nowrap' }}
+            >
               登录
             </Link>
           )}
