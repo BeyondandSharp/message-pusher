@@ -19,7 +19,7 @@ const Footer = () => {
               href='https://github.com/songquanpeng/message-pusher'
               target='_blank'
             >
-              消息推送服务 {process.env.REACT_APP_VERSION}{' '}
+              消息推送服务 {import.meta.env.VITE_APP_VERSION}{' '}
             </a>
             由{' '}
             <a href='https://github.com/songquanpeng' target='_blank'>

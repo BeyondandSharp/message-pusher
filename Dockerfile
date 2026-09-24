@@ -4,7 +4,7 @@ WORKDIR /build
 COPY ./web .
 COPY ./VERSION .
 RUN yarn install
-RUN REACT_APP_VERSION=$(cat VERSION) yarn build
+RUN VITE_APP_VERSION=$(cat VERSION) yarn build
 
 FROM golang AS builder2
 

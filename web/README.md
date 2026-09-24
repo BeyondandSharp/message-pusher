@@ -4,17 +4,22 @@
 
 ```shell
 # Install dependencies
-npm install
+pnpm install
 
 # Runs the app in the development mode
-npm start
+pnpm dev
 
 # Builds the app for production to the `build` folder
-npm run build
+pnpm run build
 ```
 
-If you want to change the default server, please set `REACT_APP_SERVER` environment variables before build,
-for example: `REACT_APP_SERVER=http://your.domain.com`.
+构建工具是 Vite（由 Create React App 迁移而来），产物输出到 `build/`，因为 `main.go` 里有 `//go:embed web/build`。
+开发模式下的接口请求由 `vite.config.js` 里的 proxy 转发到本地的 Go 服务（`http://localhost:3000`）。
+
+If you want to change the default server, please set `VITE_APP_SERVER` environment variables before build,
+for example: `VITE_APP_SERVER=http://your.domain.com`.
+
+`VITE_APP_VERSION` 用于页脚展示的版本号，Dockerfile 与 CI 会在构建时注入。
 
 Before you start editing, make sure your `Actions on Save` options have `Optimize imports` & `Run Prettier` enabled.
 

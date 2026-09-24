@@ -112,10 +112,8 @@ else
     (cd web && pnpm install --ignore-scripts)
   fi
   echo "==> 构建前端"
-  # DISABLE_ESLINT_PLUGIN：pnpm 的严格依赖布局下 eslint-config-react-app 解析不到
-  # jest/globals，CRA 的 eslint 步骤会直接失败；跳过它不影响产物。
-  # CI=""：避免 CRA 把 eslint 警告当成错误。
-  (cd web && CI="" DISABLE_ESLINT_PLUGIN=true pnpm run build)
+  # Vite 在构建时把 import.meta.env.VITE_* 静态替换进产物，这里注入版本号（对应页脚的显示）
+  (cd web && VITE_APP_VERSION="${VERSION}" pnpm run build)
 fi
 
 [[ -f web/build/index.html ]] || {

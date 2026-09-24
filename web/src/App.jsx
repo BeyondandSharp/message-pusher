@@ -44,10 +44,12 @@ function App() {
       statusDispatch({ type: 'set', payload: data });
       localStorage.setItem('footer_html', data.footer_html);
       localStorage.setItem('home_page_link', data.home_page_link);
+      // Vite 下未注入时取到的是 undefined，统一成空串，保持"未注入版本号就不提示"的语义
+      const appVersion = import.meta.env.VITE_APP_VERSION || '';
       if (
-        data.version !== process.env.REACT_APP_VERSION &&
+        data.version !== appVersion &&
         data.version !== 'v0.0.0' &&
-        process.env.REACT_APP_VERSION !== ''
+        appVersion !== ''
       ) {
         showNotice(
           `新版本可用：${data.version}，请使用快捷键 Shift + F5 刷新页面`

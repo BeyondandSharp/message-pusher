@@ -13,10 +13,10 @@ WORKDIR /build/web
 
 RUN npm install -g pnpm --registry=${NPM_REGISTRY}
 
-# 先只拷贝依赖清单，依赖没变时可以复用这一层缓存
-COPY web/package.json ./
+# 先只拷贝依赖清单，依赖没变时可以复用这一层缓存；带上 lockfile 以保证装到同样的版本
+COPY web/package.json web/pnpm-lock.yaml ./
 
-# pnpm 10+ 默认不执行依赖包自带的 build 脚本（core-js 等会因此报 ERR_PNPM_IGNORED_BUILDS），
+# pnpm 10+ 默认不执行依赖包自带的 build 脚本（esbuild 等会因此报 ERR_PNPM_IGNORED_BUILDS），
 # 这些脚本对构建产物没有影响，用 --ignore-scripts 安装即可。
 # BuildKit 缓存挂载用于保留 pnpm store：重复构建和失败重试都不用重新下载。
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -24,10 +24,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY web/ ./
 
-# DISABLE_ESLINT_PLUGIN：pnpm 的严格依赖布局下 eslint-config-react-app 解析不到 jest/globals，
-# CRA 的 eslint 步骤会直接失败；跳过它不影响产物。
-# CI=""：避免 CRA 把 eslint 警告当成错误。
-RUN CI="" DISABLE_ESLINT_PLUGIN=true REACT_APP_VERSION="${VERSION}" pnpm run build
+# Vite 在构建时把 import.meta.env.VITE_* 静态替换进产物，这里注入版本号（对应页脚的显示）
+RUN VITE_APP_VERSION="${VERSION}" pnpm run build
 
 # ---------------------------------------------------------------- 后端
 FROM golang:1.26-alpine AS backend
