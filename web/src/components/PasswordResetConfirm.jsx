@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Grid, Header, Image, Segment } from 'semantic-ui-react';
+import { Button, Card, Col, Form, Input, Row, Typography } from 'antd';
+import { MailOutlined } from '@ant-design/icons';
 import { API, copy, showError, showSuccess } from '../helpers';
 import { useSearchParams } from 'react-router-dom';
 
@@ -41,35 +42,35 @@ const PasswordResetConfirm = () => {
   }
 
   return (
-    <Grid textAlign='center' style={{ marginTop: '48px' }}>
-      <Grid.Column style={{ maxWidth: 450 }}>
-        <Header as='h2' color='telegram' textAlign='center'>
-          <Image src='/logo.png' /> 密码重置确认
-        </Header>
+    <Row justify='center' style={{ marginTop: '48px' }}>
+      <Col style={{ maxWidth: 450 }}>
+        <Typography.Title level={2} style={{ textAlign: 'center' }}>
+          <img src='/logo.png' alt='logo' /> 密码重置确认
+        </Typography.Title>
         <Form size='large'>
-          <Segment>
-            <Form.Input
-              fluid
-              icon='mail'
-              iconPosition='left'
-              placeholder='邮箱地址'
-              name='email'
-              value={email}
-              readOnly
-            />
+          <Card>
+            <Form.Item>
+              <Input
+                prefix={<MailOutlined />}
+                placeholder='邮箱地址'
+                name='email'
+                value={email}
+                readOnly
+              />
+            </Form.Item>
             <Button
-              color='telegram'
-              fluid
+              type='primary'
+              block
               size='large'
               onClick={handleSubmit}
               loading={loading}
             >
               提交
             </Button>
-          </Segment>
+          </Card>
         </Form>
-      </Grid.Column>
-    </Grid>
+      </Col>
+    </Row>
   );
 };
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Header, Message, Segment } from 'semantic-ui-react';
+import { Alert, Button, Card, Form, Input, Select, Typography } from 'antd';
 import { useParams } from 'react-router-dom';
+import FormGroup from '../../components/FormGroup';
 import { API, showError, showSuccess, verifyJSON } from '../../helpers';
 import { loadUserChannels } from '../../helpers/loader';
 
@@ -31,7 +32,8 @@ const EditWebhook = () => {
   const { name, extract_rule, construct_rule, channel } = inputs;
   let [channels, setChannels] = useState([]);
 
-  const handleInputChange = (e, { name, value }) => {
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
@@ -106,65 +108,79 @@ const EditWebhook = () => {
 
   return (
     <>
-      <Segment loading={loading}>
-        <Header as='h3'>{isEditing ? '更新接口配置' : '新建消息接口'}</Header>
+      <Card loading={loading}>
+        <Typography.Title level={3}>
+          {isEditing ? '更新接口配置' : '新建消息接口'}
+        </Typography.Title>
         <Form autoComplete='new-password'>
-          <Form.Field>
-            <Form.Input
-              label='名称'
+          <Form.Item label='名称'>
+            <Input
               name='name'
               placeholder={'请输入接口名称'}
               onChange={handleInputChange}
               value={name}
               autoComplete='new-password'
             />
-          </Form.Field>
-          <Form.Field>
-            <Form.Select
-              label='通道'
-              name='channel'
-              type={'text'}
-              options={channels}
+          </Form.Item>
+          <Form.Item label='通道'>
+            <Select
+              options={channels.map(({ text, value }) => ({
+                value,
+                label: text,
+              }))}
               placeholder={'请选择消息通道'}
-              onChange={handleInputChange}
+              onChange={(value) =>
+                setInputs((inputs) => ({ ...inputs, channel: value }))
+              }
               value={channel}
-              autoComplete='new-password'
-              required
             />
-          </Form.Field>
-          <Message>
-            如果你不知道如何写提取规则和构建规则，请看
-            <a
-              href='https://iamazing.cn/page/message-pusher-webhook'
-              target='_blank'
-            >
-              此教程
-            </a>
-            。
-          </Message>
-          <Form.Group widths='equal'>
-            <Form.TextArea
-              label='提取规则'
-              placeholder='在此输入提取规则，为一个 JSON，键为模板变量，值为 JSONPath 表达式'
-              value={inputs.extract_rule}
-              name='extract_rule'
-              onChange={handleInputChange}
-              style={{ minHeight: 200, fontFamily: 'JetBrains Mono, Consolas' }}
-            />
-          </Form.Group>
-          <Form.Group widths='equal'>
-            <Form.TextArea
-              label='构建规则'
-              placeholder='在此输入构建规则，键为 title / description / content / url；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
-              value={inputs.construct_rule}
-              name='construct_rule'
-              onChange={handleInputChange}
-              style={{ minHeight: 200, fontFamily: 'JetBrains Mono, Consolas' }}
-            />
-          </Form.Group>
+          </Form.Item>
+          <Alert
+            type='info'
+            title={
+              <>
+                如果你不知道如何写提取规则和构建规则，请看
+                <a
+                  href='https://iamazing.cn/page/message-pusher-webhook'
+                  target='_blank'
+                >
+                  此教程
+                </a>
+                。
+              </>
+            }
+          />
+          <FormGroup>
+            <Form.Item label='提取规则'>
+              <Input.TextArea
+                placeholder='在此输入提取规则，为一个 JSON，键为模板变量，值为 JSONPath 表达式'
+                value={inputs.extract_rule}
+                name='extract_rule'
+                onChange={handleInputChange}
+                style={{
+                  minHeight: 200,
+                  fontFamily: 'JetBrains Mono, Consolas',
+                }}
+              />
+            </Form.Item>
+          </FormGroup>
+          <FormGroup>
+            <Form.Item label='构建规则'>
+              <Input.TextArea
+                placeholder='在此输入构建规则，键为 title / description / content / url；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
+                value={inputs.construct_rule}
+                name='construct_rule'
+                onChange={handleInputChange}
+                style={{
+                  minHeight: 200,
+                  fontFamily: 'JetBrains Mono, Consolas',
+                }}
+              />
+            </Form.Item>
+          </FormGroup>
           <Button onClick={submit}>提交</Button>
         </Form>
-      </Segment>
+      </Card>
     </>
   );
 };

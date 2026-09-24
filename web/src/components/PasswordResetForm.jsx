@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Grid, Header, Image, Segment } from 'semantic-ui-react';
+import { Button, Card, Col, Form, Image, Input, Row, Typography } from 'antd';
+import { MailOutlined } from '@ant-design/icons';
 import { API, showError, showInfo, showSuccess } from '../helpers';
 import Turnstile from 'react-turnstile';
 
@@ -51,22 +52,22 @@ const PasswordResetForm = () => {
   }
 
   return (
-    <Grid textAlign='center' style={{ marginTop: '48px' }}>
-      <Grid.Column style={{ maxWidth: 450 }}>
-        <Header as='h2' color='telegram' textAlign='center'>
-          <Image src='/logo.png' /> 密码重置
-        </Header>
+    <Row justify='center' style={{ marginTop: '48px' }}>
+      <Col flex='1' style={{ maxWidth: 450 }}>
+        <Typography.Title level={2} style={{ textAlign: 'center' }}>
+          <Image src='/logo.png' preview={false} /> 密码重置
+        </Typography.Title>
         <Form size='large'>
-          <Segment>
-            <Form.Input
-              fluid
-              icon='mail'
-              iconPosition='left'
-              placeholder='邮箱地址'
-              name='email'
-              value={email}
-              onChange={handleChange}
-            />
+          <Card>
+            <Form.Item>
+              <Input
+                prefix={<MailOutlined />}
+                placeholder='邮箱地址'
+                name='email'
+                value={email}
+                onChange={handleChange}
+              />
+            </Form.Item>
             {turnstileEnabled ? (
               <Turnstile
                 sitekey={turnstileSiteKey}
@@ -78,18 +79,18 @@ const PasswordResetForm = () => {
               <></>
             )}
             <Button
-              color='telegram'
-              fluid
+              type='primary'
+              block
               size='large'
               onClick={handleSubmit}
               loading={loading}
             >
               提交
             </Button>
-          </Segment>
+          </Card>
         </Form>
-      </Grid.Column>
-    </Grid>
+      </Col>
+    </Row>
   );
 };
 

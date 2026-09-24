@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Button,
+  Card,
+  Col,
   Form,
-  Grid,
-  Header,
   Image,
-  Message,
-  Segment,
-} from 'semantic-ui-react';
+  Input,
+  Row,
+  Typography,
+} from 'antd';
+import { LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { API, showError, showInfo, showSuccess } from '../helpers';
 import Turnstile from 'react-turnstile';
@@ -97,63 +100,61 @@ const RegisterForm = () => {
   };
 
   return (
-    <Grid textAlign='center' style={{ marginTop: '48px' }}>
-      <Grid.Column style={{ maxWidth: 450 }}>
-        <Header as='h2' color='telegram' textAlign='center'>
+    <Row justify='center' style={{ marginTop: '48px', textAlign: 'center' }}>
+      <Col style={{ maxWidth: 450 }}>
+        <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' /> 新用户注册
-        </Header>
+        </Typography.Title>
         <Form size='large'>
-          <Segment>
-            <Form.Input
-              fluid
-              icon='user'
-              iconPosition='left'
-              placeholder='输入用户名，最长 12 位'
-              onChange={handleChange}
-              name='username'
-            />
-            <Form.Input
-              fluid
-              icon='lock'
-              iconPosition='left'
-              placeholder='输入密码，最短 8 位，最长 20 位'
-              onChange={handleChange}
-              name='password'
-              type='password'
-            />
-            <Form.Input
-              fluid
-              icon='lock'
-              iconPosition='left'
-              placeholder='输入密码，最短 8 位，最长 20 位'
-              onChange={handleChange}
-              name='password2'
-              type='password'
-            />
+          <Card>
+            <Form.Item>
+              <Input
+                prefix={<UserOutlined />}
+                placeholder='输入用户名，最长 12 位'
+                onChange={handleChange}
+                name='username'
+              />
+            </Form.Item>
+            <Form.Item>
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder='输入密码，最短 8 位，最长 20 位'
+                onChange={handleChange}
+                name='password'
+              />
+            </Form.Item>
+            <Form.Item>
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder='输入密码，最短 8 位，最长 20 位'
+                onChange={handleChange}
+                name='password2'
+              />
+            </Form.Item>
             {showEmailVerification ? (
               <>
-                <Form.Input
-                  fluid
-                  icon='mail'
-                  iconPosition='left'
-                  placeholder='输入邮箱地址'
-                  onChange={handleChange}
-                  name='email'
-                  type='email'
-                  action={
-                    <Button onClick={sendVerificationCode} disabled={loading}>
-                      获取验证码
-                    </Button>
-                  }
-                />
-                <Form.Input
-                  fluid
-                  icon='lock'
-                  iconPosition='left'
-                  placeholder='输入验证码'
-                  onChange={handleChange}
-                  name='verification_code'
-                />
+                <Form.Item>
+                  <Input
+                    prefix={<MailOutlined />}
+                    placeholder='输入邮箱地址'
+                    onChange={handleChange}
+                    name='email'
+                    type='email'
+                    addonAfter={
+                      <Button onClick={sendVerificationCode} disabled={loading}>
+                        获取验证码
+                      </Button>
+                    }
+                  />
+                </Form.Item>
+                <Form.Item>
+                  <Input
+                    prefix={<LockOutlined />}
+                    placeholder='输入验证码'
+                    onChange={handleChange}
+                    name='verification_code'
+                  />
+                </Form.Item>
               </>
             ) : (
               <></>
@@ -169,24 +170,29 @@ const RegisterForm = () => {
               <></>
             )}
             <Button
-              color='telegram'
-              fluid
+              type='primary'
+              block
               size='large'
               onClick={handleSubmit}
               loading={loading}
             >
               注册
             </Button>
-          </Segment>
+          </Card>
         </Form>
-        <Message>
-          已有账户？
-          <Link to='/login' className='btn btn-link'>
-            点击登录
-          </Link>
-        </Message>
-      </Grid.Column>
-    </Grid>
+        <Alert
+          type='info'
+          title={
+            <>
+              已有账户？
+              <Link to='/login' className='btn btn-link'>
+                点击登录
+              </Link>
+            </>
+          }
+        />
+      </Col>
+    </Row>
   );
 };
 

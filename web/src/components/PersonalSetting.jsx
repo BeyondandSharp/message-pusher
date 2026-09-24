@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Divider, Form, Header, Image, Modal } from 'semantic-ui-react';
+import {
+  Button,
+  Divider,
+  Form,
+  Image,
+  Input,
+  Modal,
+  Space,
+  Typography,
+} from 'antd';
 import { Link } from 'react-router-dom';
 import { API, copy, showError, showInfo, showSuccess } from '../helpers';
 import Turnstile from 'react-turnstile';
@@ -30,7 +39,8 @@ const PersonalSetting = () => {
     }
   }, []);
 
-  const handleInputChange = (e, { name, value }) => {
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
@@ -102,13 +112,13 @@ const PersonalSetting = () => {
 
   return (
     <div style={{ lineHeight: '40px' }}>
-      <Header as='h3'>通用设置</Header>
-      <Button as={Link} to={`/user/edit/`}>
-        更新个人信息
-      </Button>
+      <Typography.Title level={3}>通用设置</Typography.Title>
+      <Link to={`/user/edit/`}>
+        <Button>更新个人信息</Button>
+      </Link>
       {/*<Button onClick={generateToken}>生成访问令牌</Button>*/}
       <Divider />
-      <Header as='h3'>账号绑定</Header>
+      <Typography.Title level={3}>账号绑定</Typography.Title>
       {status.wechat_login && (
         <Button
           onClick={() => {
@@ -119,33 +129,28 @@ const PersonalSetting = () => {
         </Button>
       )}
       <Modal
-        onClose={() => setShowWeChatBindModal(false)}
-        onOpen={() => setShowWeChatBindModal(true)}
+        onCancel={() => setShowWeChatBindModal(false)}
         open={showWeChatBindModal}
-        size={'mini'}
+        width={400}
+        footer={null}
       >
-        <Modal.Content>
-          <Modal.Description>
-            <Image src={status.wechat_qrcode} fluid />
-            <div style={{ textAlign: 'center' }}>
-              <p>
-                微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）
-              </p>
-            </div>
-            <Form size='large'>
-              <Form.Input
-                fluid
-                placeholder='验证码'
-                name='wechat_verification_code'
-                value={inputs.wechat_verification_code}
-                onChange={handleInputChange}
-              />
-              <Button color='telegram' fluid size='large' onClick={bindWeChat}>
-                绑定
-              </Button>
-            </Form>
-          </Modal.Description>
-        </Modal.Content>
+        <Image src={status.wechat_qrcode} style={{ width: '100%' }} />
+        <div style={{ textAlign: 'center' }}>
+          <p>微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）</p>
+        </div>
+        <Form size='large'>
+          <Form.Item>
+            <Input
+              placeholder='验证码'
+              name='wechat_verification_code'
+              value={inputs.wechat_verification_code}
+              onChange={handleInputChange}
+            />
+          </Form.Item>
+          <Button type='primary' block size='large' onClick={bindWeChat}>
+            绑定
+          </Button>
+        </Form>
       </Modal>
       {status.github_oauth && (
         <Button onClick={openGitHubOAuth}>绑定 GitHub 账号</Button>
@@ -158,57 +163,54 @@ const PersonalSetting = () => {
         绑定邮箱地址
       </Button>
       <Modal
-        onClose={() => setShowEmailBindModal(false)}
-        onOpen={() => setShowEmailBindModal(true)}
+        onCancel={() => setShowEmailBindModal(false)}
         open={showEmailBindModal}
-        size={'tiny'}
-        style={{ maxWidth: '450px' }}
+        width={450}
+        title='绑定邮箱地址'
+        footer={null}
       >
-        <Modal.Header>绑定邮箱地址</Modal.Header>
-        <Modal.Content>
-          <Modal.Description>
-            <Form size='large'>
-              <Form.Input
-                fluid
+        <Form size='large'>
+          <Form.Item>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
                 placeholder='输入邮箱地址'
                 onChange={handleInputChange}
                 name='email'
                 type='email'
-                action={
-                  <Button onClick={sendVerificationCode} disabled={loading}>
-                    获取验证码
-                  </Button>
-                }
               />
-              <Form.Input
-                fluid
-                placeholder='验证码'
-                name='email_verification_code'
-                value={inputs.email_verification_code}
-                onChange={handleInputChange}
-              />
-              {turnstileEnabled ? (
-                <Turnstile
-                  sitekey={turnstileSiteKey}
-                  onVerify={(token) => {
-                    setTurnstileToken(token);
-                  }}
-                />
-              ) : (
-                <></>
-              )}
-              <Button
-                color='telegram'
-                fluid
-                size='large'
-                onClick={bindEmail}
-                loading={loading}
-              >
-                绑定
+              <Button onClick={sendVerificationCode} disabled={loading}>
+                获取验证码
               </Button>
-            </Form>
-          </Modal.Description>
-        </Modal.Content>
+            </Space.Compact>
+          </Form.Item>
+          <Form.Item>
+            <Input
+              placeholder='验证码'
+              name='email_verification_code'
+              value={inputs.email_verification_code}
+              onChange={handleInputChange}
+            />
+          </Form.Item>
+          {turnstileEnabled ? (
+            <Turnstile
+              sitekey={turnstileSiteKey}
+              onVerify={(token) => {
+                setTurnstileToken(token);
+              }}
+            />
+          ) : (
+            <></>
+          )}
+          <Button
+            type='primary'
+            block
+            size='large'
+            onClick={bindEmail}
+            loading={loading}
+          >
+            绑定
+          </Button>
+        </Form>
       </Modal>
     </div>
   );

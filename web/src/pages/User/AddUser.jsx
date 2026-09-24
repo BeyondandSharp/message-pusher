@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Form, Header, Segment } from 'semantic-ui-react';
+import { Button, Card, Form, Input, Typography } from 'antd';
 import { API, showError, showSuccess } from '../../helpers';
 
 const AddUser = () => {
@@ -11,7 +11,8 @@ const AddUser = () => {
   const [inputs, setInputs] = useState(originInputs);
   const { username, display_name, password } = inputs;
 
-  const handleInputChange = (e, { name, value }) => {
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
@@ -29,12 +30,11 @@ const AddUser = () => {
 
   return (
     <>
-      <Segment>
-        <Header as='h3'>创建新用户账户</Header>
+      <Card>
+        <Typography.Title level={3}>创建新用户账户</Typography.Title>
         <Form autoComplete='new-password'>
-          <Form.Field>
-            <Form.Input
-              label='用户名'
+          <Form.Item label='用户名'>
+            <Input
               name='username'
               placeholder={'请输入用户名'}
               onChange={handleInputChange}
@@ -42,34 +42,31 @@ const AddUser = () => {
               autoComplete='new-password'
               required
             />
-          </Form.Field>
-          <Form.Field>
-            <Form.Input
-              label='显示名称'
+          </Form.Item>
+          <Form.Item label='显示名称'>
+            <Input
               name='display_name'
               placeholder={'请输入显示名称'}
               onChange={handleInputChange}
               value={display_name}
               autoComplete='new-password'
             />
-          </Form.Field>
-          <Form.Field>
-            <Form.Input
-              label='密码'
+          </Form.Item>
+          <Form.Item label='密码'>
+            <Input.Password
               name='password'
-              type={'password'}
               placeholder={'请输入密码'}
               onChange={handleInputChange}
               value={password}
               autoComplete='new-password'
               required
             />
-          </Form.Field>
-          <Button type={'submit'} onClick={submit}>
+          </Form.Item>
+          <Button htmlType='submit' onClick={submit}>
             提交
           </Button>
         </Form>
-      </Segment>
+      </Card>
     </>
   );
 };

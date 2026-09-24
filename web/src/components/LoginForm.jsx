@@ -1,15 +1,23 @@
 import React, { useContext, useEffect, useState } from 'react';
 import {
+  Alert,
   Button,
+  Card,
+  Col,
   Divider,
   Form,
-  Grid,
-  Header,
   Image,
-  Message,
+  Input,
   Modal,
-  Segment,
-} from 'semantic-ui-react';
+  Row,
+  Typography,
+} from 'antd';
+import {
+  GithubOutlined,
+  LockOutlined,
+  UserOutlined,
+  WechatOutlined,
+} from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { UserContext } from '../context/User';
 import { API, showError, showSuccess } from '../helpers';
@@ -92,55 +100,58 @@ const LoginForm = () => {
   }
 
   return (
-    <Grid textAlign='center' style={{ marginTop: '48px' }}>
-      <Grid.Column style={{ maxWidth: 450 }}>
-        <Header as='h2' color='telegram' textAlign='center'>
+    <Row justify='center' style={{ marginTop: '48px', textAlign: 'center' }}>
+      <Col style={{ maxWidth: 450 }}>
+        <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' /> 用户登录
-        </Header>
+        </Typography.Title>
         <Form size='large'>
-          <Segment>
-            <Form.Input
-              fluid
-              icon='user'
-              iconPosition='left'
-              placeholder='用户名'
-              name='username'
-              value={username}
-              onChange={handleChange}
-            />
-            <Form.Input
-              fluid
-              icon='lock'
-              iconPosition='left'
-              placeholder='密码'
-              name='password'
-              type='password'
-              value={password}
-              onChange={handleChange}
-            />
-            <Button color='telegram' fluid size='large' onClick={handleSubmit}>
+          <Card>
+            <Form.Item>
+              <Input
+                prefix={<UserOutlined />}
+                placeholder='用户名'
+                name='username'
+                value={username}
+                onChange={handleChange}
+              />
+            </Form.Item>
+            <Form.Item>
+              <Input.Password
+                prefix={<LockOutlined />}
+                placeholder='密码'
+                name='password'
+                value={password}
+                onChange={handleChange}
+              />
+            </Form.Item>
+            <Button type='primary' block size='large' onClick={handleSubmit}>
               登录
             </Button>
-          </Segment>
+          </Card>
         </Form>
-        <Message>
-          忘记密码？
-          <Link to='/reset' className='btn btn-link'>
-            点击重置
-          </Link>
-          ； 没有账户？
-          <Link to='/register' className='btn btn-link'>
-            点击注册
-          </Link>
-        </Message>
+        <Alert
+          type='info'
+          title={
+            <>
+              忘记密码？
+              <Link to='/reset' className='btn btn-link'>
+                点击重置
+              </Link>
+              ； 没有账户？
+              <Link to='/register' className='btn btn-link'>
+                点击注册
+              </Link>
+            </>
+          }
+        />
         {status.github_oauth || status.wechat_login ? (
           <>
-            <Divider horizontal>Or</Divider>
+            <Divider plain>Or</Divider>
             {status.github_oauth ? (
               <Button
-                circular
-                color='black'
-                icon='github'
+                shape='circle'
+                icon={<GithubOutlined />}
                 onClick={onGitHubOAuthClicked}
               />
             ) : (
@@ -148,9 +159,9 @@ const LoginForm = () => {
             )}
             {status.wechat_login ? (
               <Button
-                circular
-                color='green'
-                icon='wechat'
+                shape='circle'
+                type='primary'
+                icon={<WechatOutlined />}
                 onClick={onWeChatLoginClicked}
               />
             ) : (
@@ -161,41 +172,38 @@ const LoginForm = () => {
           <></>
         )}
         <Modal
-          onClose={() => setShowWeChatLoginModal(false)}
-          onOpen={() => setShowWeChatLoginModal(true)}
+          onCancel={() => setShowWeChatLoginModal(false)}
           open={showWeChatLoginModal}
-          size={'mini'}
+          width={400}
+          footer={null}
         >
-          <Modal.Content>
-            <Modal.Description>
-              <Image src={status.wechat_qrcode} fluid />
-              <div style={{ textAlign: 'center' }}>
-                <p>
-                  微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）
-                </p>
-              </div>
-              <Form size='large'>
-                <Form.Input
-                  fluid
-                  placeholder='验证码'
-                  name='wechat_verification_code'
-                  value={inputs.wechat_verification_code}
-                  onChange={handleChange}
-                />
-                <Button
-                  color='telegram'
-                  fluid
-                  size='large'
-                  onClick={onSubmitWeChatVerificationCode}
-                >
-                  登录
-                </Button>
-              </Form>
-            </Modal.Description>
-          </Modal.Content>
+          <Image src={status.wechat_qrcode} style={{ width: '100%' }} />
+          <div style={{ textAlign: 'center' }}>
+            <p>
+              微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）
+            </p>
+          </div>
+          <Form size='large'>
+            <Form.Item>
+              <Input
+                placeholder='验证码'
+                name='wechat_verification_code'
+                value={inputs.wechat_verification_code}
+                onChange={handleChange}
+              />
+            </Form.Item>
+            <Button
+              type='primary'
+              block
+              size='large'
+              onClick={onSubmitWeChatVerificationCode}
+            >
+              登录
+            </Button>
+          </Form>
         </Modal>
-      </Grid.Column>
-    </Grid>
+      </Col>
+    </Row>
   );
 };
 
