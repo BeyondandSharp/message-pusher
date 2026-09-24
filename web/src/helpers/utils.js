@@ -1,4 +1,4 @@
-import { toast } from 'react-toastify';
+import { getToastApi } from './toast';
 import { toastConstants } from '../constants';
 import { API } from './api';
 
@@ -54,69 +54,85 @@ export function isMobile() {
   return window.innerWidth <= 600;
 }
 
-let showErrorOptions = { autoClose: toastConstants.ERROR_TIMEOUT };
-let showWarningOptions = { autoClose: toastConstants.WARNING_TIMEOUT };
-let showSuccessOptions = { autoClose: toastConstants.SUCCESS_TIMEOUT };
-let showInfoOptions = { autoClose: toastConstants.INFO_TIMEOUT };
-let showNoticeOptions = { autoClose: false };
-
-if (isMobile()) {
-  showErrorOptions.position = 'top-center';
-  // showErrorOptions.transition = 'flip';
-
-  showSuccessOptions.position = 'top-center';
-  // showSuccessOptions.transition = 'flip';
-
-  showInfoOptions.position = 'top-center';
-  // showInfoOptions.transition = 'flip';
-
-  showNoticeOptions.position = 'top-center';
-  // showNoticeOptions.transition = 'flip';
-}
+// antd 的 message/notification 用 duration（秒）控制自动关闭，0 表示不自动关闭。
+// 原来是 react-toastify 的毫秒级 autoClose，这里做等值换算。
+const showErrorDuration = toastConstants.ERROR_TIMEOUT / 1000;
+const showWarningDuration = toastConstants.WARNING_TIMEOUT / 1000;
+const showSuccessDuration = toastConstants.SUCCESS_TIMEOUT / 1000;
+const showInfoDuration = toastConstants.INFO_TIMEOUT / 1000;
+const showNoticeDuration = 0;
 
 export function showError(error) {
   console.error(error);
+  const { message } = getToastApi();
   if (error.message) {
     if (error.name === 'AxiosError') {
-      switch (error.response.status) {
+      switch (error.response?.status) {
         case 401:
-          // toast.error('错误：未登录或登录已过期，请重新登录！', showErrorOptions);
+          // 未登录或登录已过期，直接跳转登录页
           window.location.href = '/login?expired=true';
           break;
         case 429:
-          toast.error('错误：请求次数过多，请稍后再试！', showErrorOptions);
+          message.error({
+            content: '错误：请求次数过多，请稍后再试！',
+            duration: showErrorDuration,
+          });
           break;
         case 500:
-          toast.error('错误：服务器内部错误，请联系管理员！', showErrorOptions);
+          message.error({
+            content: '错误：服务器内部错误，请联系管理员！',
+            duration: showErrorDuration,
+          });
           break;
         case 405:
-          toast.info('本站仅作演示之用，无服务端！');
+          message.info('本站仅作演示之用，无服务端！');
           break;
         default:
-          toast.error('错误：' + error.message, showErrorOptions);
+          message.error({
+            content: '错误：' + error.message,
+            duration: showErrorDuration,
+          });
       }
       return;
     }
-    toast.error('错误：' + error.message, showErrorOptions);
+    message.error({
+      content: '错误：' + error.message,
+      duration: showErrorDuration,
+    });
   } else {
-    toast.error('错误：' + error, showErrorOptions);
+    message.error({
+      content: '错误：' + error,
+      duration: showErrorDuration,
+    });
   }
 }
 
 export function showWarning(message) {
-  toast.warn(message, showWarningOptions);
+  getToastApi().message.warning({
+    content: message,
+    duration: showWarningDuration,
+  });
 }
 
 export function showSuccess(message) {
-  toast.success(message, showSuccessOptions);
+  getToastApi().message.success({
+    content: message,
+    duration: showSuccessDuration,
+  });
 }
 
 export function showInfo(message) {
-  toast.info(message, showInfoOptions);
+  getToastApi().message.info({
+    content: message,
+    duration: showInfoDuration,
+  });
 }
 
 export function showNotice(message) {
-  toast.info(message, showNoticeOptions);
+  getToastApi().message.info({
+    content: message,
+    duration: showNoticeDuration,
+  });
 }
 
 export function openPage(url) {
