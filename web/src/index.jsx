@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App as AntdApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { Container } from 'semantic-ui-react';
 import App from './App';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -24,9 +23,12 @@ root.render(
           <UserProvider>
             <BrowserRouter>
               <Header />
-              <Container className={'main-content'}>
+              <div
+                className={'main-content'}
+                style={{ maxWidth: 1127, margin: '0 auto' }}
+              >
                 <App />
-              </Container>
+              </div>
               <Footer />
             </BrowserRouter>
           </UserProvider>

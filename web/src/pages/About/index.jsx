@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Header, Segment } from 'semantic-ui-react';
+import { Card, Typography } from 'antd';
 import { API, showError } from '../../helpers';
 import { marked } from 'marked';
 
@@ -27,26 +27,21 @@ const About = () => {
   }, []);
 
   return (
-    <>
-      <Segment>
-        {aboutLoaded && about === '' ? (
-          <>
-            <Header as='h3'>关于</Header>
-            <p>可在设置页面设置关于内容，支持 HTML & Markdown</p>
-            项目仓库地址：
-            <a href='https://github.com/songquanpeng/message-pusher'>
-              https://github.com/songquanpeng/message-pusher
-            </a>
-          </>
-        ) : (
-          <>
-            <div dangerouslySetInnerHTML={{ __html: about }}></div>
-          </>
-        )}
-      </Segment>
-    </>
+    <Card>
+      {aboutLoaded && about === '' ? (
+        <>
+          <Typography.Title level={3}>关于</Typography.Title>
+          <p>可在设置页面设置关于内容，支持 HTML & Markdown</p>
+          项目仓库地址：
+          <a href='https://github.com/songquanpeng/message-pusher'>
+            https://github.com/songquanpeng/message-pusher
+          </a>
+        </>
+      ) : (
+        <div dangerouslySetInnerHTML={{ __html: about }}></div>
+      )}
+    </Card>
   );
 };
-
 
 export default About;

@@ -1,19 +1,10 @@
 import React from 'react';
-import { Segment, Header } from 'semantic-ui-react';
+import { Alert, Typography } from 'antd';
 
 const NotFound = () => (
   <>
-    <Header
-      block
-      as="h4"
-      content="404"
-      attached="top"
-      icon="info"
-      className="small-icon"
-    />
-    <Segment attached="bottom">
-      未找到所请求的页面
-    </Segment>
+    <Typography.Title level={4}>404</Typography.Title>
+    <Alert type='info' showIcon title='未找到所请求的页面' />
   </>
 );
 

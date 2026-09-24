@@ -1,4 +1,4 @@
-import { Label } from 'semantic-ui-react';
+import { Tag } from 'antd';
 import { timestamp2string } from './utils';
 import React from 'react';
 import { CHANNEL_OPTIONS } from '../constants';
@@ -14,17 +14,9 @@ export function renderChannel(key) {
   }
   let channel = channelMap[key];
   if (channel) {
-    return (
-      <Label basic style={{ backgroundColor: channel.color, color: 'white' }}>
-        {channel.text}
-      </Label>
-    );
+    return <Tag color={channel.color}>{channel.text}</Tag>;
   }
-  return (
-    <Label basic color='red'>
-      未知通道
-    </Label>
-  );
+  return <Tag color='red'>未知通道</Tag>;
 }
 
 export function renderTimestamp(timestamp) {

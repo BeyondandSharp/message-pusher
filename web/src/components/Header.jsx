@@ -2,7 +2,20 @@ import React, { useContext, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserContext } from '../context/User';
 
-import { Button, Container, Dropdown, Icon, Menu, Segment } from 'semantic-ui-react';
+import { Button, Dropdown, Layout, Menu, Space } from 'antd';
+import {
+  ApartmentOutlined,
+  CloseOutlined,
+  CodeOutlined,
+  DownOutlined,
+  EditOutlined,
+  HomeOutlined,
+  InfoCircleOutlined,
+  MailOutlined,
+  MenuOutlined,
+  SettingOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { API, isAdmin, isMobile, showSuccess } from '../helpers';
 import '../index.css';
 
@@ -11,45 +24,59 @@ const headerButtons = [
   {
     name: '首页',
     to: '/',
-    icon: 'home',
+    icon: <HomeOutlined />,
   },
   {
     name: '消息',
     to: '/message',
-    icon: 'mail',
+    icon: <MailOutlined />,
   },
   {
     name: '编辑',
     to: '/editor',
-    icon: 'edit',
+    icon: <EditOutlined />,
   },
   {
     name: '通道',
     to: '/channel',
-    icon: 'sitemap',
+    icon: <ApartmentOutlined />,
   },
   {
     name: '接口',
     to: '/webhook',
-    icon: 'code',
+    icon: <CodeOutlined />,
   },
   {
     name: '用户',
     to: '/user',
-    icon: 'user',
+    icon: <UserOutlined />,
     admin: true,
   },
   {
     name: '设置',
     to: '/setting',
-    icon: 'setting',
+    icon: <SettingOutlined />,
   },
   {
     name: '关于',
     to: '/about',
-    icon: 'info circle',
+    icon: <InfoCircleOutlined />,
   },
 ];
+
+const containerStyle = {
+  maxWidth: 1127,
+  margin: '0 auto',
+  padding: '0 1em',
+};
+
+const headerStyle = {
+  background: '#fff',
+  borderBottom: '1px solid #f0f0f0',
+  padding: 0,
+  height: 52,
+  lineHeight: 'normal',
+};
 
 const Header = () => {
   const [userState, userDispatch] = useContext(UserContext);
@@ -70,95 +97,100 @@ const Header = () => {
     setShowSidebar(!showSidebar);
   };
 
-  const renderButtons = (isMobile) => {
-    return headerButtons.map((button) => {
-      if (button.admin && !isAdmin()) return <></>;
-      if (isMobile) {
-        return (
-          <Menu.Item
-            onClick={() => {
-              navigate(button.to);
-              setShowSidebar(false);
-            }}
-          >
-            {button.name}
-          </Menu.Item>
-        );
+  const visibleButtons = headerButtons.filter(
+    (button) => !(button.admin && !isAdmin())
+  );
+
+  const renderButtons = (mobile) => {
+    return visibleButtons.map((button) => {
+      if (mobile) {
+        return {
+          key: button.to,
+          label: button.name,
+          onClick: () => {
+            navigate(button.to);
+            setShowSidebar(false);
+          },
+        };
       }
-      return (
-        <Menu.Item key={button.name} as={Link} to={button.to}>
-          <Icon name={button.icon} />
-          {button.name}
-        </Menu.Item>
-      );
+      return {
+        key: button.to,
+        icon: button.icon,
+        label: <Link to={button.to}>{button.name}</Link>,
+      };
     });
   };
 
   if (isMobile()) {
     return (
       <>
-        <Menu
-          borderless
-          size='large'
-          style={
-            showSidebar
-              ? {
-                  borderBottom: 'none',
-                  marginBottom: '0',
-                  borderTop: 'none',
-                  height: '51px',
-                }
-              : { borderTop: 'none', height: '52px' }
-          }
-        >
-          <Container>
-            <Menu.Item as={Link} to='/'>
+        <Layout.Header style={headerStyle}>
+          <div
+            style={{
+              ...containerStyle,
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <Link
+              to='/'
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                color: 'inherit',
+              }}
+            >
               <img
                 src='/logo.png'
                 alt='logo'
-                style={{ marginRight: '0.75em' }}
+                style={{ height: 32, marginRight: '0.75em' }}
               />
-              <div style={{ fontSize: '20px' }}>
+              <span style={{ fontSize: '20px' }}>
                 <b>消息推送服务</b>
-              </div>
-            </Menu.Item>
-            <Menu.Menu position='right'>
-              <Menu.Item onClick={toggleSidebar}>
-                <Icon name={showSidebar ? 'close' : 'sidebar'} />
-              </Menu.Item>
-            </Menu.Menu>
-          </Container>
-        </Menu>
+              </span>
+            </Link>
+            <Button
+              type='text'
+              aria-label='menu'
+              icon={showSidebar ? <CloseOutlined /> : <MenuOutlined />}
+              onClick={toggleSidebar}
+            />
+          </div>
+        </Layout.Header>
         {showSidebar ? (
-          <Segment style={{ marginTop: 0, borderTop: '0' }}>
-            <Menu secondary vertical style={{ width: '100%', margin: 0 }}>
-              {renderButtons(true)}
-              <Menu.Item>
-                {userState.user ? (
-                  <Button onClick={logout}>注销</Button>
-                ) : (
-                  <>
-                    <Button
-                      onClick={() => {
-                        setShowSidebar(false);
-                        navigate('/login');
-                      }}
-                    >
-                      登录
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        setShowSidebar(false);
-                        navigate('/register');
-                      }}
-                    >
-                      注册
-                    </Button>
-                  </>
-                )}
-              </Menu.Item>
-            </Menu>
-          </Segment>
+          <div style={containerStyle}>
+            <Menu
+              mode='inline'
+              items={renderButtons(true)}
+              style={{ width: '100%', borderInlineEnd: 'none' }}
+            />
+            <div style={{ padding: '8px 0' }}>
+              {userState.user ? (
+                <Button onClick={logout}>注销</Button>
+              ) : (
+                <Space>
+                  <Button
+                    onClick={() => {
+                      setShowSidebar(false);
+                      navigate('/login');
+                    }}
+                  >
+                    登录
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowSidebar(false);
+                      navigate('/register');
+                    }}
+                  >
+                    注册
+                  </Button>
+                </Space>
+              )}
+            </div>
+          </div>
         ) : (
           <></>
         )}
@@ -168,37 +200,67 @@ const Header = () => {
 
   return (
     <>
-      <Menu borderless style={{ borderTop: 'none' }}>
-        <Container>
-          <Menu.Item as={Link} to='/' className={'hide-on-mobile'}>
-            <img src='/logo.png' alt='logo' style={{ marginRight: '0.75em' }} />
-            <div style={{ fontSize: '20px' }}>
+      <Layout.Header style={headerStyle}>
+        <div
+          style={{
+            ...containerStyle,
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <Link
+            to='/'
+            className={'hide-on-mobile'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              color: 'inherit',
+              marginRight: '1em',
+            }}
+          >
+            <img
+              src='/logo.png'
+              alt='logo'
+              style={{ height: 32, marginRight: '0.75em' }}
+            />
+            <span style={{ fontSize: '20px' }}>
               <b>消息推送服务</b>
-            </div>
-          </Menu.Item>
-          {renderButtons(false)}
-          <Menu.Menu position='right'>
-            {userState.user ? (
-              <Dropdown
-                text={userState.user.username}
-                pointing
-                className='link item'
+            </span>
+          </Link>
+          <Menu
+            mode='horizontal'
+            items={renderButtons(false)}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              borderBottom: 'none',
+              background: 'transparent',
+            }}
+          />
+          {userState.user ? (
+            <Dropdown
+              menu={{
+                items: [{ key: 'logout', label: '注销' }],
+                onClick: ({ key }) => {
+                  if (key === 'logout') logout();
+                },
+              }}
+            >
+              <a
+                onClick={(e) => e.preventDefault()}
+                style={{ color: 'inherit', whiteSpace: 'nowrap' }}
               >
-                <Dropdown.Menu>
-                  <Dropdown.Item onClick={logout}>注销</Dropdown.Item>
-                </Dropdown.Menu>
-              </Dropdown>
-            ) : (
-              <Menu.Item
-                name='登录'
-                as={Link}
-                to='/login'
-                className='btn btn-link'
-              />
-            )}
-          </Menu.Menu>
-        </Container>
-      </Menu>
+                {userState.user.username} <DownOutlined />
+              </a>
+            </Dropdown>
+          ) : (
+            <Link to='/login' style={{ color: 'inherit', whiteSpace: 'nowrap' }}>
+              登录
+            </Link>
+          )}
+        </div>
+      </Layout.Header>
     </>
   );
 };
