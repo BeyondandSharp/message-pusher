@@ -101,12 +101,12 @@ else
     exit 1
   }
   echo "==> 安装前端依赖"
-  # pnpm 10+ 默认不执行依赖包自带的 build 脚本，本项目的 core-js 会因此抛出
-  # ERR_PNPM_IGNORED_BUILDS 并非 0 退出；这些脚本对构建产物没有影响，
-  # 用 --ignore-scripts 安装即可（pnpm 官方说明：安装不会因此失败）。
+  # pnpm 10+ 默认不执行依赖包自带的 build 脚本（本项目是 esbuild），并要求在
+  # web/pnpm-workspace.yaml 的 allowBuilds 里给出明确表态；那里已经写成 esbuild: false，
+  # 因此这里配合 --ignore-scripts 安装。若该文件被改回 pnpm 的占位值，install 会以
+  # ERR_PNPM_IGNORED_BUILDS 失败，且 --ignore-scripts 也救不了。
   if ! (cd web && pnpm install --ignore-scripts); then
-    # 若上一次安装失败留下了“待执行构建脚本”的残留状态，--ignore-scripts 也会失败，
-    # 此时清掉 node_modules 重新安装即可。
+    # 兜底：清掉可能处于半成品状态的 node_modules 再装一次
     echo "==> 安装失败，清理 web/node_modules 后重试"
     rm -rf web/node_modules
     (cd web && pnpm install --ignore-scripts)

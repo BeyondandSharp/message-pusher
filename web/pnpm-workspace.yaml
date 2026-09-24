@@ -1,4 +1,16 @@
+# 这个文件同时承载两项 pnpm 策略设置，缺一不可（Docker 构建时也要一起拷进镜像）。
+
+# pnpm 10+ 默认不执行依赖包自带的 build 脚本，对每个这样的包要求一个明确表态。
+# 这里对 esbuild 明确表示「拒绝执行」：本项目所有安装流程都带 --ignore-scripts，
+# esbuild 的平台二进制来自它自己的 optionalDependencies（@esbuild/<platform>），
+# 跳过 postinstall 不影响构建，构建产物已由仓库的构建流程验证。
+# 注意：必须写成明确的 true / false。pnpm 生成的占位文本会让**所有** install 以
+# ERR_PNPM_IGNORED_BUILDS 失败（连 --ignore-scripts 也救不了）。
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: false
+
+# vite 8.3.1 落在 pnpm 的 minimumReleaseAge 窗口内，这里显式豁免；
+# 否则按 lockfile 安装会以 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION 失败，
+# 所以 Dockerfile 的前端层必须在安装前把本文件一起 COPY 进去。
 minimumReleaseAgeExclude:
   - vite@8.3.1
