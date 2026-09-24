@@ -76,7 +76,7 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 ### 通过 Docker 部署
 部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v /home/ubuntu/data/message-pusher:/data ghcr.io/beyondandsharp/message-pusher`
 
-也可以从 Docker Hub 拉取：把上面的 `ghcr.io/beyondandsharp/message-pusher` 替换为 `<你的 Docker Hub 用户名>/message-pusher`（对应仓库打 tag 时由 workflow 推送）。
+打 tag 后，`docker-image-amd64` / `docker-image-arm64` 两个 workflow 会自动构建并推送镜像到 GHCR：`ghcr.io/<你的 GitHub 用户名>/message-pusher`。
 
 更新：`docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR`
 
@@ -114,44 +114,67 @@ sudo service nginx restart
 ```
 
 ### 本地构建镜像
-如果你修改了代码，想自己构建镜像并导出成可以直接导入 Docker 的镜像文件，可以直接运行仓库根目录的 `build-image.sh`：
+改过代码后想自己构建镜像、并导出成可直接导入 Docker 的镜像文件，用仓库根目录的两个脚本之一（在仓库根目录执行）：
 
 ```shell
-./build-image.sh                          # 生成 dist/message-pusher-<版本>-<架构>.tar
-./build-image.sh message-pusher:mybuild   # 指定镜像名
-./build-image.sh --skip-frontend          # 复用已有的 web/build，不重新构建前端
-GOPROXY=https://goproxy.cn,direct ./build-image.sh   # 指定 Go 模块代理
+./build-image-alpine.sh     # 推荐：前端和后端都在容器内的 Alpine 里编译，本机只要有 docker
+./build-image.sh            # 前端用本机 pnpm 构建，后端在容器内编译（Dockerfile.local）
 ```
 
-脚本会依次用 pnpm 构建前端、用 `Dockerfile.local` 在容器里编译后端、最后 `docker save` 出镜像文件。
+两者选项一致：
+
+| 选项 | 说明 |
+|---|---|
+| `[镜像名[:标签]]` | 镜像名，默认 `message-pusher:<git describe 出来的版本>` |
+| `-o, --output-dir DIR` | 镜像文件输出目录，默认 `dist` |
+| `--no-save` | 只构建镜像，不导出镜像文件 |
+| `--skip-frontend` | 仅 `build-image.sh`：复用已有的 `web/build`，不重新构建前端 |
+| `-h, --help` | 显示帮助 |
+
+```shell
+./build-image-alpine.sh                          # 生成 dist/message-pusher_<版本>-<架构>.tar
+./build-image-alpine.sh message-pusher:v1        # 指定镜像名:标签
+./build-image-alpine.sh -o out --no-save         # 换输出目录，且只构建不导出
+./build-image.sh --skip-frontend                 # 前端已经构建过，跳过这一步
+```
+
+`<架构>` 由 `uname -m` 决定（`amd64` / `arm64`）。脚本最后会把镜像 `docker save` 成 tar 文件，
 在目标机器上导入并运行：
 
 ```shell
-docker load -i dist/message-pusher-<版本>-<架构>.tar
-docker run -d --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v "$(pwd)/data:/data" message-pusher:<版本>
+docker load -i dist/message-pusher_<版本>-<架构>.tar
+docker run -d --restart always --name message-pusher -p 3000:3000 \
+  -e TZ=Asia/Shanghai -v "$(pwd)/data:/data" message-pusher:<版本>
 ```
 
-依赖：本机需要有 `pnpm` 和 `docker`。
+**依赖**：`build-image-alpine.sh` 只需要本机有 `docker`；`build-image.sh` 还需要 `pnpm`。
+前者每次都要在容器里重装一遍前端依赖，比复用本机 `web/node_modules` 的后者慢一些。
 
-如果本机不想装 `pnpm`/`node`/`go`，可以改用全 Alpine 一体化构建，前端和后端都在容器内编译，**只需要本机有 docker**：
+**构建时用到的下载代理**（都可用环境变量覆盖，设为空字符串即改用默认源）：
+
+| 环境变量 | 默认值 | 用途 |
+|---|---|---|
+| `APK_PROXY` / `APT_PROXY` | `http://192.168.2.12:3142` | apk / apt 包缓存代理：改写容器内 `/etc/apk/repositories`，Debian 系写 `/etc/apt/apt.conf.d/99proxy` |
+| `GOPROXY` | `http://192.168.2.12:50100,direct` | Go 模块代理（局域网里的 Athens） |
+| `NPM_REGISTRY` | 官方源 | npm registry，仅 `build-image-alpine.sh` 使用 |
 
 ```shell
-./build-image-alpine.sh                          # 生成 dist/message-pusher-<版本>-<架构>.tar
-./build-image-alpine.sh message-pusher:mybuild   # 指定镜像名
-./build-image-alpine.sh --no-save                # 只构建镜像，不导出 tar
-GOPROXY=https://goproxy.cn,direct ./build-image-alpine.sh   # 指定 Go 模块代理
-```
+# 不用局域网缓存，走公网默认源
+APK_PROXY= APT_PROXY= GOPROXY= ./build-image-alpine.sh
 
-该脚本使用 `Dockerfile.alpine`（`node:*-alpine` 构建前端 → `golang:*-alpine` 编译后端 → `alpine` 运行时），
-代价是每次构建都要在容器里重装一遍前端依赖，比复用本机 `web/node_modules` 的 `build-image.sh` 慢。
+# 换成其它代理 / npm 镜像
+GOPROXY=https://goproxy.cn,direct \
+NPM_REGISTRY=https://registry.npmmirror.com \
+./build-image-alpine.sh message-pusher:v1
+```
 
 ### 手动部署
 1. 从 [GitHub Releases](https://github.com/BeyondandSharp/message-pusher/releases/latest) 下载可执行文件或者从源码编译：
    ```shell
    git clone https://github.com/BeyondandSharp/message-pusher.git
    cd message-pusher/web
-   npm install
-   npm run build
+   pnpm install
+   pnpm run build
    cd ..
    go mod download
    go build -ldflags "-s -w" -o message-pusher
