@@ -1,13 +1,13 @@
 import React from 'react';
-import { Header, Segment } from 'semantic-ui-react';
+import { Card, Typography } from 'antd';
 import WebhooksTable from '../../components/WebhooksTable';
 
 const Webhook = () => (
   <>
-    <Segment>
-      <Header as='h3'>我的接口</Header>
+    <Card>
+      <Typography.Title level={3}>我的接口</Typography.Title>
       <WebhooksTable />
-    </Segment>
+    </Card>
   </>
 );
 

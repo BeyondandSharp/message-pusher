@@ -1,12 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Button,
-  Form,
-  Label,
-  Pagination,
-  Popup,
-  Table,
-} from 'semantic-ui-react';
+import { Button, Form, Input, Pagination, Popconfirm, Table, Tag } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, showError, showSuccess, testChannel } from '../helpers';
 
@@ -38,13 +32,13 @@ const ChannelsTable = () => {
     setLoading(false);
   };
 
-  const onPaginationChange = (e, { activePage }) => {
+  const onPaginationChange = (page) => {
     (async () => {
-      if (activePage === Math.ceil(channels.length / ITEMS_PER_PAGE) + 1) {
+      if (page === Math.ceil(channels.length / ITEMS_PER_PAGE) + 1) {
         // In this case we have to load more data and then append them.
-        await loadChannels(activePage - 1);
+        await loadChannels(page - 1);
       }
-      setActivePage(activePage);
+      setActivePage(page);
     })();
   };
 
@@ -61,7 +55,7 @@ const ChannelsTable = () => {
       });
   }, []);
 
-  const manageChannel = async (id, action, idx) => {
+  const manageChannel = async (id, action) => {
     let data = { id };
     let res;
     switch (action) {
@@ -82,7 +76,7 @@ const ChannelsTable = () => {
       showSuccess('操作成功完成！');
       let channel = res.data.data;
       let newChannels = [...channels];
-      let realIdx = (activePage - 1) * ITEMS_PER_PAGE + idx;
+      let realIdx = newChannels.findIndex((item) => item.id === id);
       if (action === 'delete') {
         newChannels[realIdx].deleted = true;
       } else {
@@ -97,18 +91,18 @@ const ChannelsTable = () => {
   const renderStatus = (status) => {
     switch (status) {
       case 1:
-        return <Label basic>已启用</Label>;
+        return <Tag variant='outlined'>已启用</Tag>;
       case 2:
         return (
-          <Label basic color='red'>
+          <Tag variant='outlined' color='red'>
             已禁用
-          </Label>
+          </Tag>
         );
       default:
         return (
-          <Label basic color='grey'>
+          <Tag variant='outlined' color='default'>
             未知状态
-          </Label>
+          </Tag>
         );
     }
   };
@@ -132,8 +126,8 @@ const ChannelsTable = () => {
     setSearching(false);
   };
 
-  const handleKeywordChange = async (e, { value }) => {
-    setSearchKeyword(value.trim());
+  const handleKeywordChange = async (e) => {
+    setSearchKeyword(e.target.value.trim());
   };
 
   const sortChannel = (key) => {
@@ -161,184 +155,172 @@ const ChannelsTable = () => {
     setLoading(false);
   };
 
+  const columns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('id');
+        },
+      }),
+    },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      key: 'name',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('name');
+        },
+      }),
+    },
+    {
+      title: '备注',
+      dataIndex: 'description',
+      key: 'description',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('description');
+        },
+      }),
+      render: (description) => (description ? description : '无备注信息'),
+    },
+    {
+      title: '类型',
+      dataIndex: 'type',
+      key: 'type',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('type');
+        },
+      }),
+      render: (type) => renderChannel(type),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('status');
+        },
+      }),
+      render: (status) => renderStatus(status),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_time',
+      key: 'created_time',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortChannel('created_time');
+        },
+      }),
+      render: (created_time) => renderTimestamp(created_time),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, channel) => (
+        <div>
+          <Button
+            type='primary'
+            size={'small'}
+            onClick={() => {
+              testChannel(user.username, user.token, channel.name).then();
+            }}
+          >
+            测试
+          </Button>
+          <Button
+            size={'small'}
+            onClick={() => {
+              manageChannel(
+                channel.id,
+                channel.status === 1 ? 'disable' : 'enable'
+              ).then();
+            }}
+          >
+            {channel.status === 1 ? '禁用' : '启用'}
+          </Button>
+          <Link to={'/channel/edit/' + channel.id}>
+            <Button type='primary' size={'small'}>
+              编辑
+            </Button>
+          </Link>
+          <Popconfirm
+            title='确定删除？'
+            description={'删除通道 ' + channel.name}
+            onConfirm={() => {
+              manageChannel(channel.id, 'delete').then();
+            }}
+          >
+            <Button size={'small'} danger>
+              删除
+            </Button>
+          </Popconfirm>
+        </div>
+      ),
+    },
+  ];
+
+  const totalPages =
+    Math.ceil(channels.length / ITEMS_PER_PAGE) +
+    (channels.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
+
   return (
     <>
-      <Form onSubmit={searchChannels}>
-        <Form.Input
-          icon='search'
-          fluid
-          iconPosition='left'
-          placeholder='搜索通道的 ID 或名称 ...'
-          value={searchKeyword}
-          loading={searching}
-          onChange={handleKeywordChange}
-        />
+      <Form onFinish={searchChannels}>
+        <Form.Item>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder='搜索通道的 ID 或名称 ...'
+            value={searchKeyword}
+            onChange={handleKeywordChange}
+          />
+        </Form.Item>
       </Form>
 
-      <Table basic>
-        <Table.Header>
-          <Table.Row>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('id');
-              }}
-            >
-              ID
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('name');
-              }}
-            >
-              名称
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('description');
-              }}
-            >
-              备注
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('type');
-              }}
-            >
-              类型
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('status');
-              }}
-            >
-              状态
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortChannel('created_time');
-              }}
-            >
-              创建时间
-            </Table.HeaderCell>
-            <Table.HeaderCell>操作</Table.HeaderCell>
-          </Table.Row>
-        </Table.Header>
+      <Table
+        columns={columns}
+        dataSource={channels
+          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
+          .filter((channel) => !channel.deleted)}
+        rowKey='id'
+        pagination={false}
+        size='small'
+      />
 
-        <Table.Body>
-          {channels
-            .slice(
-              (activePage - 1) * ITEMS_PER_PAGE,
-              activePage * ITEMS_PER_PAGE
-            )
-            .map((channel, idx) => {
-              if (channel.deleted) return <></>;
-              return (
-                <Table.Row key={channel.id}>
-                  <Table.Cell>{channel.id}</Table.Cell>
-                  <Table.Cell>{channel.name}</Table.Cell>
-                  <Table.Cell>
-                    {channel.description ? channel.description : '无备注信息'}
-                  </Table.Cell>
-                  <Table.Cell>{renderChannel(channel.type)}</Table.Cell>
-                  <Table.Cell>{renderStatus(channel.status)}</Table.Cell>
-                  <Table.Cell>
-                    {renderTimestamp(channel.created_time)}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <div>
-                      <Button
-                        positive
-                        size={'small'}
-                        onClick={() => {
-                          testChannel(
-                            user.username,
-                            user.token,
-                            channel.name
-                          ).then();
-                        }}
-                      >
-                        测试
-                      </Button>
-                      <Button
-                        size={'small'}
-                        color={'yellow'}
-                        onClick={() => {
-                          manageChannel(
-                            channel.id,
-                            channel.status === 1 ? 'disable' : 'enable',
-                            idx
-                          ).then();
-                        }}
-                      >
-                        {channel.status === 1 ? '禁用' : '启用'}
-                      </Button>
-                      <Button
-                        size={'small'}
-                        primary
-                        as={Link}
-                        to={'/channel/edit/' + channel.id}
-                      >
-                        编辑
-                      </Button>
-                      <Popup
-                        trigger={
-                          <Button size='small' negative>
-                            删除
-                          </Button>
-                        }
-                        on='click'
-                        flowing
-                        hoverable
-                      >
-                        <Button
-                          size={'small'}
-                          negative
-                          onClick={() => {
-                            manageChannel(channel.id, 'delete', idx).then();
-                          }}
-                        >
-                          删除通道 {channel.name}
-                        </Button>
-                      </Popup>
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })}
-        </Table.Body>
-
-        <Table.Footer>
-          <Table.Row>
-            <Table.HeaderCell colSpan='7'>
-              <Button
-                size='small'
-                as={Link}
-                to='/channel/add'
-                loading={loading}
-              >
-                添加新的通道
-              </Button>
-              <Pagination
-                floated='right'
-                activePage={activePage}
-                onPageChange={onPaginationChange}
-                size='small'
-                siblingRange={1}
-                totalPages={
-                  Math.ceil(channels.length / ITEMS_PER_PAGE) +
-                  (channels.length % ITEMS_PER_PAGE === 0 ? 1 : 0)
-                }
-              />
-            </Table.HeaderCell>
-          </Table.Row>
-        </Table.Footer>
-      </Table>
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Link to='/channel/add'>
+          <Button size='small' loading={loading}>
+            添加新的通道
+          </Button>
+        </Link>
+        <Pagination
+          current={activePage}
+          onChange={onPaginationChange}
+          total={totalPages * ITEMS_PER_PAGE}
+          pageSize={ITEMS_PER_PAGE}
+          size='small'
+          showSizeChanger={false}
+        />
+      </div>
     </>
   );
 };

@@ -1,13 +1,13 @@
 import React from 'react';
-import { Header, Segment } from 'semantic-ui-react';
+import { Card, Typography } from 'antd';
 import ChannelsTable from '../../components/ChannelsTable';
 
 const Channel = () => (
   <>
-    <Segment>
-      <Header as='h3'>我的通道</Header>
+    <Card>
+      <Typography.Title level={3}>我的通道</Typography.Title>
       <ChannelsTable />
-    </Segment>
+    </Card>
   </>
 );
 

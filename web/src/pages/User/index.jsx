@@ -1,13 +1,13 @@
 import React from 'react';
-import { Segment, Header } from 'semantic-ui-react';
+import { Card, Typography } from 'antd';
 import UsersTable from '../../components/UsersTable';
 
 const User = () => (
   <>
-    <Segment>
-      <Header as='h3'>管理用户</Header>
+    <Card>
+      <Typography.Title level={3}>管理用户</Typography.Title>
       <UsersTable/>
-    </Segment>
+    </Card>
   </>
 );
 

@@ -1,13 +1,13 @@
 import React from 'react';
-import { Header, Segment } from 'semantic-ui-react';
+import { Card, Typography } from 'antd';
 import MessagesTable from '../../components/MessagesTable';
 
 const Message = () => (
   <>
-    <Segment>
-      <Header as='h3'>我的消息</Header>
+    <Card>
+      <Typography.Title level={3}>我的消息</Typography.Title>
       <MessagesTable />
-    </Segment>
+    </Card>
   </>
 );
 

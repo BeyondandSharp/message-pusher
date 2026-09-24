@@ -3,11 +3,13 @@ import {
   Button,
   Dropdown,
   Form,
-  Label,
+  Input,
   Pagination,
-  Popup,
+  Popconfirm,
   Table,
-} from 'semantic-ui-react';
+  Tag,
+} from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, showError, showSuccess } from '../helpers';
 
@@ -16,13 +18,13 @@ import { ITEMS_PER_PAGE } from '../constants';
 function renderRole(role) {
   switch (role) {
     case 1:
-      return <Label>普通用户</Label>;
+      return <Tag>普通用户</Tag>;
     case 10:
-      return <Label color='yellow'>管理员</Label>;
+      return <Tag color='yellow'>管理员</Tag>;
     case 100:
-      return <Label color='orange'>超级管理员</Label>;
+      return <Tag color='orange'>超级管理员</Tag>;
     default:
-      return <Label color='red'>未知身份</Label>;
+      return <Tag color='red'>未知身份</Tag>;
   }
 }
 
@@ -50,13 +52,13 @@ const UsersTable = () => {
     setLoading(false);
   };
 
-  const onPaginationChange = (e, { activePage }) => {
+  const onPaginationChange = (page) => {
     (async () => {
-      if (activePage === Math.ceil(users.length / ITEMS_PER_PAGE) + 1) {
+      if (page === Math.ceil(users.length / ITEMS_PER_PAGE) + 1) {
         // In this case we have to load more data and then append them.
-        await loadUsers(activePage - 1);
+        await loadUsers(page - 1);
       }
-      setActivePage(activePage);
+      setActivePage(page);
     })();
   };
 
@@ -68,7 +70,7 @@ const UsersTable = () => {
       });
   }, []);
 
-  const manageUser = (username, action, idx) => {
+  const manageUser = (username, action, user) => {
     (async () => {
       const res = await API.post('/api/user/manage', {
         username,
@@ -77,17 +79,15 @@ const UsersTable = () => {
       const { success, message } = res.data;
       if (success) {
         showSuccess('操作成功完成！');
-        let user = res.data.data;
+        let newUser = res.data.data;
         let newUsers = [...users];
-        let realIdx = (activePage - 1) * ITEMS_PER_PAGE + idx;
         if (action === 'delete') {
-          newUsers[realIdx].deleted = true;
+          user.deleted = true;
         } else {
-          newUsers[realIdx].status = user.status;
-          newUsers[realIdx].role = user.role;
-          newUsers[realIdx].send_email_to_others = user.send_email_to_others;
-          newUsers[realIdx].save_message_to_database =
-            user.save_message_to_database;
+          user.status = newUser.status;
+          user.role = newUser.role;
+          user.send_email_to_others = newUser.send_email_to_others;
+          user.save_message_to_database = newUser.save_message_to_database;
         }
         setUsers(newUsers);
       } else {
@@ -99,18 +99,18 @@ const UsersTable = () => {
   const renderStatus = (status) => {
     switch (status) {
       case 1:
-        return <Label basic>已激活</Label>;
+        return <Tag variant='outlined'>已激活</Tag>;
       case 2:
         return (
-          <Label basic color='red'>
+          <Tag variant='outlined' color='red'>
             已封禁
-          </Label>
+          </Tag>
         );
       default:
         return (
-          <Label basic color='grey'>
+          <Tag variant='outlined' color='default'>
             未知状态
-          </Label>
+          </Tag>
         );
     }
   };
@@ -134,8 +134,8 @@ const UsersTable = () => {
     setSearching(false);
   };
 
-  const handleKeywordChange = async (e, { value }) => {
-    setSearchKeyword(value.trim());
+  const handleKeywordChange = async (e) => {
+    setSearchKeyword(e.target.value.trim());
   };
 
   const sortUser = (key) => {
@@ -152,207 +152,212 @@ const UsersTable = () => {
     setLoading(false);
   };
 
+  const columns = [
+    {
+      title: '用户名',
+      dataIndex: 'username',
+      key: 'username',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortUser('username');
+        },
+      }),
+    },
+    {
+      title: '显示名称',
+      dataIndex: 'display_name',
+      key: 'display_name',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortUser('display_name');
+        },
+      }),
+    },
+    {
+      title: '邮箱地址',
+      dataIndex: 'email',
+      key: 'email',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortUser('email');
+        },
+      }),
+      render: (email) => (email ? email : '无'),
+    },
+    {
+      title: '用户角色',
+      dataIndex: 'role',
+      key: 'role',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortUser('role');
+        },
+      }),
+      render: (role) => renderRole(role),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortUser('status');
+        },
+      }),
+      render: (status) => renderStatus(status),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, user) => (
+        <div>
+          <Button
+            type='primary'
+            size={'small'}
+            onClick={() => {
+              manageUser(user.username, 'promote', user);
+            }}
+          >
+            提升
+          </Button>
+          <Button
+            size={'small'}
+            onClick={() => {
+              manageUser(user.username, 'demote', user);
+            }}
+          >
+            降级
+          </Button>
+          <Popconfirm
+            title='确定删除？'
+            description={'删除账户 ' + user.username}
+            onConfirm={() => {
+              manageUser(user.username, 'delete', user);
+            }}
+          >
+            <Button size={'small'} danger>
+              删除
+            </Button>
+          </Popconfirm>
+          <Button
+            size={'small'}
+            onClick={() => {
+              manageUser(
+                user.username,
+                user.status === 1 ? 'disable' : 'enable',
+                user
+              );
+            }}
+          >
+            {user.status === 1 ? '禁用' : '启用'}
+          </Button>
+          <Link to={'/user/edit/' + user.id}>
+            <Button size={'small'}>编辑</Button>
+          </Link>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'send_email_to_others',
+                  label:
+                    user.send_email_to_others === 1
+                      ? '撤回发送任意邮件的权限'
+                      : '授予发送任意邮件的权限',
+                },
+                {
+                  key: 'save_message_to_database',
+                  label:
+                    user.save_message_to_database === 1
+                      ? '撤回消息持久化的权限'
+                      : '授予消息持久化的权限',
+                },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'send_email_to_others') {
+                  manageUser(
+                    user.username,
+                    user.send_email_to_others === 1
+                      ? 'disallow_send_email_to_others'
+                      : 'allow_send_email_to_others',
+                    user
+                  );
+                } else if (key === 'save_message_to_database') {
+                  manageUser(
+                    user.username,
+                    user.save_message_to_database === 1
+                      ? 'disallow_save_message_to_database'
+                      : 'allow_save_message_to_database',
+                    user
+                  );
+                }
+              },
+            }}
+          >
+            <Button size={'small'}>更多</Button>
+          </Dropdown>
+        </div>
+      ),
+    },
+  ];
+
+  const totalPages =
+    Math.ceil(users.length / ITEMS_PER_PAGE) +
+    (users.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
+
   return (
     <>
-      <Form onSubmit={searchUsers}>
-        <Form.Input
-          icon='search'
-          fluid
-          iconPosition='left'
-          placeholder='搜索用户的 ID，用户名，显示名称，以及邮箱地址 ...'
-          value={searchKeyword}
-          loading={searching}
-          onChange={handleKeywordChange}
-        />
+      <Form onFinish={searchUsers}>
+        <Form.Item>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder='搜索用户的 ID，用户名，显示名称，以及邮箱地址 ...'
+            value={searchKeyword}
+            onChange={handleKeywordChange}
+          />
+        </Form.Item>
       </Form>
 
-      <Table basic>
-        <Table.Header>
-          <Table.Row>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortUser('username');
-              }}
-            >
-              用户名
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortUser('display_name');
-              }}
-            >
-              显示名称
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortUser('email');
-              }}
-            >
-              邮箱地址
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortUser('role');
-              }}
-            >
-              用户角色
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortUser('status');
-              }}
-            >
-              状态
-            </Table.HeaderCell>
-            <Table.HeaderCell>操作</Table.HeaderCell>
-          </Table.Row>
-        </Table.Header>
+      <Table
+        columns={columns}
+        dataSource={users
+          .slice(
+            (activePage - 1) * ITEMS_PER_PAGE,
+            activePage * ITEMS_PER_PAGE
+          )
+          .filter((user) => !user.deleted)}
+        rowKey='id'
+        pagination={false}
+        size='small'
+      />
 
-        <Table.Body>
-          {users
-            .slice(
-              (activePage - 1) * ITEMS_PER_PAGE,
-              activePage * ITEMS_PER_PAGE
-            )
-            .map((user, idx) => {
-              if (user.deleted) return <></>;
-              return (
-                <Table.Row key={user.id}>
-                  <Table.Cell>{user.username}</Table.Cell>
-                  <Table.Cell>{user.display_name}</Table.Cell>
-                  <Table.Cell>{user.email ? user.email : '无'}</Table.Cell>
-                  <Table.Cell>{renderRole(user.role)}</Table.Cell>
-                  <Table.Cell>{renderStatus(user.status)}</Table.Cell>
-                  <Table.Cell>
-                    <div>
-                      <Button
-                        size={'small'}
-                        positive
-                        onClick={() => {
-                          manageUser(user.username, 'promote', idx);
-                        }}
-                      >
-                        提升
-                      </Button>
-                      <Button
-                        size={'small'}
-                        color={'yellow'}
-                        onClick={() => {
-                          manageUser(user.username, 'demote', idx);
-                        }}
-                      >
-                        降级
-                      </Button>
-                      <Popup
-                        trigger={
-                          <Button size='small' negative>
-                            删除
-                          </Button>
-                        }
-                        on='click'
-                        flowing
-                        hoverable
-                      >
-                        <Button
-                          negative
-                          onClick={() => {
-                            manageUser(user.username, 'delete', idx);
-                          }}
-                        >
-                          删除账户 {user.username}
-                        </Button>
-                      </Popup>
-                      <Button
-                        size={'small'}
-                        onClick={() => {
-                          manageUser(
-                            user.username,
-                            user.status === 1 ? 'disable' : 'enable',
-                            idx
-                          );
-                        }}
-                      >
-                        {user.status === 1 ? '禁用' : '启用'}
-                      </Button>
-                      <Button
-                        size={'small'}
-                        as={Link}
-                        to={'/user/edit/' + user.id}
-                      >
-                        编辑
-                      </Button>
-                      <Dropdown
-                        size={'small'}
-                        text='更多'
-                        button
-                        className={'small'}
-                      >
-                        <Dropdown.Menu>
-                          <Dropdown.Item
-                            onClick={() => {
-                              manageUser(
-                                user.username,
-                                user.send_email_to_others === 1
-                                  ? 'disallow_send_email_to_others'
-                                  : 'allow_send_email_to_others',
-                                idx
-                              );
-                            }}
-                          >
-                            {user.send_email_to_others === 1
-                              ? '撤回发送任意邮件的权限'
-                              : '授予发送任意邮件的权限'}
-                          </Dropdown.Item>
-                          <Dropdown.Item
-                            onClick={() => {
-                              manageUser(
-                                user.username,
-                                user.save_message_to_database === 1
-                                  ? 'disallow_save_message_to_database'
-                                  : 'allow_save_message_to_database',
-                                idx
-                              );
-                            }}
-                          >
-                            {user.save_message_to_database === 1
-                              ? '撤回消息持久化的权限'
-                              : '授予消息持久化的权限'}
-                          </Dropdown.Item>
-                        </Dropdown.Menu>
-                      </Dropdown>
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })}
-        </Table.Body>
-
-        <Table.Footer>
-          <Table.Row>
-            <Table.HeaderCell colSpan='6'>
-              <Button size='small' as={Link} to='/user/add' loading={loading}>
-                添加新的用户
-              </Button>
-              <Pagination
-                floated='right'
-                activePage={activePage}
-                onPageChange={onPaginationChange}
-                size='small'
-                siblingRange={1}
-                totalPages={
-                  Math.ceil(users.length / ITEMS_PER_PAGE) +
-                  (users.length % ITEMS_PER_PAGE === 0 ? 1 : 0)
-                }
-              />
-            </Table.HeaderCell>
-          </Table.Row>
-        </Table.Footer>
-      </Table>
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Link to='/user/add'>
+          <Button size='small' loading={loading}>
+            添加新的用户
+          </Button>
+        </Link>
+        <Pagination
+          current={activePage}
+          onChange={onPaginationChange}
+          total={totalPages * ITEMS_PER_PAGE}
+          pageSize={ITEMS_PER_PAGE}
+          size='small'
+          showSizeChanger={false}
+        />
+      </div>
     </>
   );
 };

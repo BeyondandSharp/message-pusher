@@ -2,12 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Form,
-  Label,
+  Input,
   Modal,
   Pagination,
-  Popup,
+  Popconfirm,
   Table,
-} from 'semantic-ui-react';
+  Tag,
+} from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import {
   API,
   openPage,
@@ -26,33 +28,33 @@ function renderStatus(status) {
   switch (status) {
     case 1:
       return (
-        <Label basic color='olive'>
+        <Tag variant='outlined' color='lime'>
           正在发送
-        </Label>
+        </Tag>
       );
     case 2:
       return (
-        <Label basic color='green'>
+        <Tag variant='outlined' color='green'>
           发送成功
-        </Label>
+        </Tag>
       );
     case 3:
       return (
-        <Label basic color='red'>
+        <Tag variant='outlined' color='red'>
           发送失败
-        </Label>
+        </Tag>
       );
     case 4:
       return (
-        <Label basic color='orange'>
+        <Tag variant='outlined' color='orange'>
           已在队列
-        </Label>
+        </Tag>
       );
     default:
       return (
-        <Label basic color='grey'>
+        <Tag variant='outlined' color='default'>
           未知状态
-        </Label>
+        </Tag>
       );
   }
 }
@@ -92,13 +94,13 @@ const MessagesTable = () => {
     setLoading(false);
   };
 
-  const onPaginationChange = (e, { activePage }) => {
+  const onPaginationChange = (page) => {
     (async () => {
-      if (activePage === Math.ceil(messages.length / ITEMS_PER_PAGE) + 1) {
+      if (page === Math.ceil(messages.length / ITEMS_PER_PAGE) + 1) {
         // In this case we have to load more data and then append them.
-        await loadMessages(activePage - 1);
+        await loadMessages(page - 1);
       }
-      setActivePage(activePage);
+      setActivePage(page);
     })();
   };
 
@@ -177,15 +179,14 @@ const MessagesTable = () => {
     setLoading(false);
   };
 
-  const deleteMessage = async (id, idx) => {
+  const deleteMessage = async (id, record) => {
     setLoading(true);
     const res = await API.delete(`/api/message/${id}`);
     const { success, message } = res.data;
     if (success) {
       showSuccess('操作成功完成！');
       let newMessages = [...messages];
-      let realIdx = (activePage - 1) * ITEMS_PER_PAGE + idx;
-      newMessages[realIdx].deleted = true;
+      record.deleted = true;
       setMessages(newMessages);
     } else {
       showError(message);
@@ -212,8 +213,8 @@ const MessagesTable = () => {
     setSearching(false);
   };
 
-  const handleKeywordChange = async (e, { value }) => {
-    setSearchKeyword(value.trim());
+  const handleKeywordChange = async (e) => {
+    setSearchKeyword(e.target.value.trim());
   };
 
   const sortMessage = (key) => {
@@ -264,222 +265,226 @@ const MessagesTable = () => {
     return () => clearInterval(intervalId);
   }, [autoRefresh]);
 
+  const columns = [
+    {
+      title: '消息 ID',
+      dataIndex: 'id',
+      key: 'id',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortMessage('id');
+        },
+      }),
+      render: (id) => '#' + id,
+    },
+    {
+      title: '标题',
+      dataIndex: 'title',
+      key: 'title',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortMessage('title');
+        },
+      }),
+      render: (title) => (title ? title : '无标题'),
+    },
+    {
+      title: '通道',
+      dataIndex: 'channel',
+      key: 'channel',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortMessage('channel');
+        },
+      }),
+      render: (channel) => <Tag>{channel}</Tag>,
+    },
+    {
+      title: '发送时间',
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortMessage('timestamp');
+        },
+      }),
+      render: (timestamp) => renderTimestamp(timestamp),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      onHeaderCell: () => ({
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          sortMessage('status');
+        },
+      }),
+      render: (status) => renderStatus(status),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_, record) => (
+        <div>
+          <Button
+            type='primary'
+            size={'small'}
+            loading={loading}
+            onClick={() => {
+              viewMessage(record.id).then();
+            }}
+          >
+            查看
+          </Button>
+          <Link to={'/editor/' + record.id}>
+            <Button type='primary' size={'small'} loading={loading}>
+              编辑
+            </Button>
+          </Link>
+          <Button
+            size={'small'}
+            loading={loading}
+            onClick={() => {
+              resendMessage(record.id).then();
+            }}
+          >
+            重发
+          </Button>
+          <Popconfirm
+            title='确定删除？'
+            description={'删除消息 #' + record.id}
+            okButtonProps={{ danger: true, loading }}
+            onConfirm={() => {
+              deleteMessage(record.id, record).then();
+            }}
+          >
+            <Button size={'small'} danger>
+              删除
+            </Button>
+          </Popconfirm>
+        </div>
+      ),
+    },
+  ];
+
+  const totalPages =
+    Math.ceil(messages.length / ITEMS_PER_PAGE) +
+    (messages.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
+
   return (
     <>
-      <Form onSubmit={searchMessages}>
-        <Form.Input
-          icon='search'
-          fluid
-          iconPosition='left'
-          placeholder='搜索消息的 ID，标题，描述，以及消息内容 ...'
-          value={searchKeyword}
-          loading={searching}
-          onChange={handleKeywordChange}
-        />
+      <Form onFinish={searchMessages}>
+        <Form.Item>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder='搜索消息的 ID，标题，描述，以及消息内容 ...'
+            value={searchKeyword}
+            onChange={handleKeywordChange}
+          />
+        </Form.Item>
       </Form>
-      <Table basic loading={loading}>
-        <Table.Header>
-          <Table.Row>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
+      <Table
+        columns={columns}
+        dataSource={messages
+          .slice(
+            (activePage - 1) * ITEMS_PER_PAGE,
+            activePage * ITEMS_PER_PAGE
+          )
+          .filter((message) => !message.deleted)}
+        rowKey='id'
+        pagination={false}
+        size='small'
+        loading={loading}
+      />
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            size='small'
+            loading={loading}
+            onClick={() => {
+              refresh().then();
+            }}
+          >
+            手动刷新
+          </Button>
+          <Button
+            size='small'
+            loading={loading}
+            onClick={() => {
+              setAutoRefresh(!autoRefresh);
+              setAutoRefreshSeconds(10);
+            }}
+          >
+            {autoRefresh
+              ? `自动刷新中（${autoRefreshSeconds} 秒后刷新）`
+              : '自动刷新'}
+          </Button>
+        </div>
+        <Pagination
+          current={activePage}
+          onChange={onPaginationChange}
+          total={totalPages * ITEMS_PER_PAGE}
+          pageSize={ITEMS_PER_PAGE}
+          size='small'
+          showSizeChanger={false}
+        />
+      </div>
+      <Modal
+        title={message.title ? message.title : '无标题'}
+        open={viewModalOpen}
+        onCancel={() => {
+          setViewModalOpen(false);
+        }}
+        width={520}
+        footer={
+          <>
+            <Button
               onClick={() => {
-                sortMessage('id');
-              }}
-            >
-              消息 ID
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortMessage('title');
-              }}
-            >
-              标题
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortMessage('channel');
-              }}
-            >
-              通道
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortMessage('timestamp');
-              }}
-            >
-              发送时间
-            </Table.HeaderCell>
-            <Table.HeaderCell
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                sortMessage('status');
-              }}
-            >
-              状态
-            </Table.HeaderCell>
-            <Table.HeaderCell>操作</Table.HeaderCell>
-          </Table.Row>
-        </Table.Header>
-
-        <Table.Body>
-          {messages
-            .slice(
-              (activePage - 1) * ITEMS_PER_PAGE,
-              activePage * ITEMS_PER_PAGE
-            )
-            .map((message, idx) => {
-              if (message.deleted) return <></>;
-              return (
-                <Table.Row key={message.id}>
-                  <Table.Cell>{'#' + message.id}</Table.Cell>
-                  <Table.Cell>
-                    {message.title ? message.title : '无标题'}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Label>{message.channel}</Label>
-                  </Table.Cell>
-                  <Table.Cell>{renderTimestamp(message.timestamp)}</Table.Cell>
-                  <Table.Cell>{renderStatus(message.status)}</Table.Cell>
-                  <Table.Cell>
-                    <div>
-                      <Button
-                        size={'small'}
-                        positive
-                        loading={loading}
-                        onClick={() => {
-                          viewMessage(message.id).then();
-                        }}
-                      >
-                        查看
-                      </Button>
-                      <Button
-                        size={'small'}
-                        primary
-                        loading={loading}
-                        as={Link}
-                        to={'/editor/' + message.id}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        size={'small'}
-                        color={'yellow'}
-                        loading={loading}
-                        onClick={() => {
-                          resendMessage(message.id).then();
-                        }}
-                      >
-                        重发
-                      </Button>
-
-                      <Popup
-                        trigger={
-                          <Button size='small' negative>
-                            删除
-                          </Button>
-                        }
-                        on='click'
-                        flowing
-                        hoverable
-                      >
-                        <Button
-                          size={'small'}
-                          negative
-                          loading={loading}
-                          onClick={() => {
-                            deleteMessage(message.id, idx).then();
-                          }}
-                        >
-                          删除消息 #{message.id}
-                        </Button>
-                      </Popup>
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })}
-        </Table.Body>
-
-        <Table.Footer>
-          <Table.Row>
-            <Table.HeaderCell colSpan='6'>
-              <Button
-                size='small'
-                loading={loading}
-                onClick={() => {
-                  refresh().then();
-                }}
-              >
-                手动刷新
-              </Button>
-              <Button
-                size='small'
-                loading={loading}
-                onClick={() => {
-                  setAutoRefresh(!autoRefresh);
-                  setAutoRefreshSeconds(10);
-                }}
-              >
-                {autoRefresh
-                  ? `自动刷新中（${autoRefreshSeconds} 秒后刷新）`
-                  : '自动刷新'}
-              </Button>
-              <Pagination
-                floated='right'
-                activePage={activePage}
-                onPageChange={onPaginationChange}
-                size='small'
-                siblingRange={1}
-                totalPages={
-                  Math.ceil(messages.length / ITEMS_PER_PAGE) +
-                  (messages.length % ITEMS_PER_PAGE === 0 ? 1 : 0)
+                if (message.URL) {
+                  openPage(message.URL);
+                } else {
+                  openPage(`/message/${message.link}`);
                 }
-              />
-            </Table.HeaderCell>
-          </Table.Row>
-        </Table.Footer>
-      </Table>
-      <Modal size='tiny' open={viewModalOpen}>
-        <Modal.Header>{message.title ? message.title : '无标题'}</Modal.Header>
-        <Modal.Content>
-          {message.description ? (
-            <p className={'quote'}>{message.description}</p>
-          ) : (
-            ''
-          )}
-          {message.content ? (
-            <div
-              dangerouslySetInnerHTML={{
-                __html: marked.parse(message.content),
               }}
-            ></div>
-          ) : (
-            ''
-          )}
-        </Modal.Content>
-        <Modal.Actions>
-          <Button
-            onClick={() => {
-              if (message.URL) {
-                openPage(message.URL);
-              } else {
-                openPage(`/message/${message.link}`);
-              }
+            >
+              访问链接
+            </Button>
+            <Button
+              onClick={() => {
+                setViewModalOpen(false);
+              }}
+            >
+              关闭
+            </Button>
+          </>
+        }
+      >
+        {message.description ? (
+          <p className={'quote'}>{message.description}</p>
+        ) : (
+          ''
+        )}
+        {message.content ? (
+          <div
+            dangerouslySetInnerHTML={{
+              __html: marked.parse(message.content),
             }}
-          >
-            访问链接
-          </Button>
-          <Button
-            onClick={() => {
-              setViewModalOpen(false);
-            }}
-          >
-            关闭
-          </Button>
-        </Modal.Actions>
+          ></div>
+        ) : (
+          ''
+        )}
       </Modal>
     </>
   );
