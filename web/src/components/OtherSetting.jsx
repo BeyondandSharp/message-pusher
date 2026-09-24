@@ -86,12 +86,12 @@ const OtherSetting = () => {
 
   const openGitHubRelease = () => {
     window.location =
-      'https://github.com/songquanpeng/message-pusher/releases/latest';
+      'https://github.com/BeyondandSharp/message-pusher/releases/latest';
   };
 
   const checkUpdate = async () => {
     const res = await API.get(
-      'https://api.github.com/repos/songquanpeng/message-pusher/releases/latest',
+      'https://api.github.com/repos/BeyondandSharp/message-pusher/releases/latest',
     );
     const { tag_name, body } = res.data;
     if (tag_name === import.meta.env.VITE_APP_VERSION) {

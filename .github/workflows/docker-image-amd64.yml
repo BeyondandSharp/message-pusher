@@ -42,7 +42,7 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: |
-            justsong/message-pusher
+            ${{ secrets.DOCKERHUB_USERNAME }}/message-pusher
             ghcr.io/${{ github.repository }}
 
       - name: Build and push Docker images

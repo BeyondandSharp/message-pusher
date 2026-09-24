@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/songquanpeng/message-pusher"><img src="https://raw.githubusercontent.com/songquanpeng/message-pusher/master/web/public/logo.png" width="150" height="150" alt="message-pusher logo"></a>
+  <a href="https://github.com/BeyondandSharp/message-pusher"><img src="https://raw.githubusercontent.com/BeyondandSharp/message-pusher/master/web/public/logo.png" width="150" height="150" alt="message-pusher logo"></a>
 </p>
 
 <div align="center">
@@ -11,36 +11,29 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 </div>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/songquanpeng/message-pusher/main/LICENSE">
-    <img src="https://img.shields.io/github/license/songquanpeng/message-pusher?color=brightgreen" alt="license">
+  <a href="https://raw.githubusercontent.com/BeyondandSharp/message-pusher/main/LICENSE">
+    <img src="https://img.shields.io/github/license/BeyondandSharp/message-pusher?color=brightgreen" alt="license">
   </a>
-  <a href="https://github.com/songquanpeng/message-pusher/releases/latest">
-    <img src="https://img.shields.io/github/v/release/songquanpeng/message-pusher?color=brightgreen&include_prereleases" alt="release">
+  <a href="https://github.com/BeyondandSharp/message-pusher/releases/latest">
+    <img src="https://img.shields.io/github/v/release/BeyondandSharp/message-pusher?color=brightgreen&include_prereleases" alt="release">
   </a>
-  <a href="https://hub.docker.com/repository/docker/justsong/message-pusher">
-    <img src="https://img.shields.io/docker/pulls/justsong/message-pusher?color=brightgreen" alt="docker pull">
+  <a href="https://github.com/BeyondandSharp/message-pusher/releases/latest">
+    <img src="https://img.shields.io/github/downloads/BeyondandSharp/message-pusher/total?color=brightgreen&include_prereleases" alt="release">
   </a>
-  <a href="https://github.com/songquanpeng/message-pusher/releases/latest">
-    <img src="https://img.shields.io/github/downloads/songquanpeng/message-pusher/total?color=brightgreen&include_prereleases" alt="release">
-  </a>
-  <a href="https://goreportcard.com/report/github.com/songquanpeng/message-pusher">
-    <img src="https://goreportcard.com/badge/github.com/songquanpeng/message-pusher" alt="GoReportCard">
+  <a href="https://goreportcard.com/report/github.com/BeyondandSharp/message-pusher">
+    <img src="https://goreportcard.com/badge/github.com/BeyondandSharp/message-pusher" alt="GoReportCard">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/songquanpeng/message-pusher/releases">程序下载</a>
+  <a href="https://github.com/BeyondandSharp/message-pusher/releases">程序下载</a>
   ·
   <a href="#部署">部署教程</a>
   ·
   <a href="#用法">使用教程</a>
   ·
-  <a href="https://github.com/songquanpeng/message-pusher/issues">意见反馈</a>
-  ·
-  <a href="https://push.justsong.cn">在线演示</a>
+  <a href="https://github.com/BeyondandSharp/message-pusher/issues">意见反馈</a>
 </p>
-
-> **Warning**：原域名（msgpusher.com）将于 2026-11-24 下线，请尽快迁移至 https://push.justsong.cn
 
 > **Warning**：从 `v0.3` 版本升级到 `v0.4` 版本需要手动迁移数据库，具体方法见[迁移数据库](#迁移数据库)。
 
@@ -81,9 +74,9 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 
 ## 部署
 ### 通过 Docker 部署
-部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v /home/ubuntu/data/message-pusher:/data justsong/message-pusher`
+部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v /home/ubuntu/data/message-pusher:/data ghcr.io/beyondandsharp/message-pusher`
 
-如果无法拉去，请将 `justsong/message-pusher` 替换为 `ghcr.io/songquanpeng/message-pusher`。
+也可以从 Docker Hub 拉取：把上面的 `ghcr.io/beyondandsharp/message-pusher` 替换为 `<你的 Docker Hub 用户名>/message-pusher`（对应仓库打 tag 时由 workflow 推送）。
 
 更新：`docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR`
 
@@ -94,7 +87,7 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 Nginx 的参考配置：
 ```
 server{
-   server_name push.justsong.cn;  # 请根据实际情况修改你的域名
+   server_name your-domain.com;  # 请根据实际情况修改你的域名
    
    location / {
           client_max_body_size  64m;
@@ -153,9 +146,9 @@ GOPROXY=https://goproxy.cn,direct ./build-image-alpine.sh   # 指定 Go 模块�
 代价是每次构建都要在容器里重装一遍前端依赖，比复用本机 `web/node_modules` 的 `build-image.sh` 慢。
 
 ### 手动部署
-1. 从 [GitHub Releases](https://github.com/songquanpeng/message-pusher/releases/latest) 下载可执行文件或者从源码编译：
+1. 从 [GitHub Releases](https://github.com/BeyondandSharp/message-pusher/releases/latest) 下载可执行文件或者从源码编译：
    ```shell
-   git clone https://github.com/songquanpeng/message-pusher.git
+   git clone https://github.com/BeyondandSharp/message-pusher.git
    cd message-pusher/web
    npm install
    npm run build
@@ -317,7 +310,7 @@ proxy_send_timeout 300s;
 ```shell
 #!/bin/bash
 
-MESSAGE_PUSHER_SERVER="https://push.justsong.cn"
+MESSAGE_PUSHER_SERVER="https://your-domain.com"
 MESSAGE_PUSHER_USERNAME="test"
 MESSAGE_PUSHER_TOKEN="666"
 
@@ -341,7 +334,7 @@ send_message 'title' 'description' 'content'
 
 另一个版本：
 ```shell
-MESSAGE_PUSHER_SERVER="https://push.justsong.cn"
+MESSAGE_PUSHER_SERVER="https://your-domain.com"
 MESSAGE_PUSHER_USERNAME="test"
 MESSAGE_PUSHER_TOKEN="666"
 MESSAGE_PUSHER_CHANNEL="lark"
@@ -371,7 +364,7 @@ uname -ra | sendmsg
 ```python
 import requests
 
-SERVER = "https://push.justsong.cn"
+SERVER = "https://your-domain.com"
 USERNAME = "test"
 TOKEN = "666"
 
@@ -419,7 +412,7 @@ import (
    "net/url"
 )
 
-var serverAddress = "https://push.justsong.cn"
+var serverAddress = "https://your-domain.com"
 var username = "test"
 var token = "666"
 
@@ -525,7 +518,7 @@ namespace Demo
     /// <summary>
     /// 消息推送工具
     /// 
-    /// <para>开源地址：https://github.com/songquanpeng/message-pusher</para>
+    /// <para>开源地址：https://github.com/BeyondandSharp/message-pusher</para>
     /// <para>支持：Framework、Net3.1、Net5、Net6</para>
     /// <para>引用包：</para>
     /// <para>dotnet add package Newtonsoft.Json -v 13.0.2</para>
@@ -536,7 +529,7 @@ namespace Demo
         /// <summary>
         /// ServerAddress
         /// </summary>
-        public const string ServerAddress = "https://push.justsong.cn";
+        public const string ServerAddress = "https://your-domain.com";
 
         /// <summary>
         /// UserName
@@ -647,7 +640,7 @@ namespace Demo
 const axios = require('axios');
 const querystring = require('querystring');
 
-const MESSAGE_PUSHER_SERVER = 'https://push.justsong.cn'
+const MESSAGE_PUSHER_SERVER = 'https://your-domain.com'
 const MESSAGE_PUSHER_USERNAME = 'test'
 const MESSAGE_PUSHER_TOKEN = '666'
 
@@ -709,6 +702,6 @@ send_message('标题', '描述', '**Markdown 内容**')
 注意，执行前请确保数据库中 `users` 表中字段的顺序和脚本中的一致，否则会出现数据错乱的情况。
 
 ## 其他
-1. `v0.3` 之前的版本基于 Node.js，你可以切换到 [`nodejs`](https://github.com/songquanpeng/message-pusher/tree/nodejs) 分支查看，该版本不再有功能性更新。
+1. `v0.3` 之前的版本基于 Node.js，你可以切换到 [`nodejs`](https://github.com/BeyondandSharp/message-pusher/tree/nodejs) 分支查看，该版本不再有功能性更新。
 2. `v0.3` 以及后续版本基于 Gin Template [`v0.2.1`](https://github.com/songquanpeng/gin-template) 版本开发。
 3. 如果想要自行编译，请首先[编译前端](./web/README.md)，之后再编译后端，否则会遇到 `pattern web/build: no matching files found` 问题。

@@ -2,7 +2,7 @@ version: "3"
 
 services:
   message-pusher:
-    image: justsong/message-pusher
+    image: ghcr.io/beyondandsharp/message-pusher
     restart: unless-stopped
     ports:
       - 3000:3000

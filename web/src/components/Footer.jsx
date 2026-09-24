@@ -17,14 +17,14 @@ const Footer = () => {
       {Footer === '' ? (
         <div className='custom-footer'>
           <a
-            href='https://github.com/songquanpeng/message-pusher'
+            href='https://github.com/BeyondandSharp/message-pusher'
             target='_blank'
           >
             消息推送服务 {import.meta.env.VITE_APP_VERSION}{' '}
           </a>
           由{' '}
-          <a href='https://github.com/songquanpeng' target='_blank'>
-            JustSong
+          <a href='https://github.com/BeyondandSharp' target='_blank'>
+            BeyondandSharp
           </a>{' '}
           构建，源代码遵循{' '}
           <a href='https://opensource.org/licenses/mit-license.php'>MIT 协议</a>

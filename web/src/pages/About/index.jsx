@@ -33,8 +33,8 @@ const About = () => {
           <Typography.Title level={3}>关于</Typography.Title>
           <p>可在设置页面设置关于内容，支持 HTML & Markdown</p>
           项目仓库地址：
-          <a href='https://github.com/songquanpeng/message-pusher'>
-            https://github.com/songquanpeng/message-pusher
+          <a href='https://github.com/BeyondandSharp/message-pusher'>
+            https://github.com/BeyondandSharp/message-pusher
           </a>
         </>
       ) : (
