@@ -18,8 +18,8 @@ importers:
         specifier: ^0.27.2
         version: 0.27.2(debug@4.4.3(supports-color@8.1.1))
       marked:
-        specifier: ^4.1.1
-        version: 4.3.0
+        specifier: ^18.0.14
+        version: 18.0.14
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -904,9 +904,9 @@ packages:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
 
-  marked@4.3.0:
-    resolution: {integrity: sha512-PRsaiG84bK+AMvxziE/lCFss8juXjNaWzVbN5tXAm4XjeaS9NAHhop+PjQxz2A9h8Q4M/xGmzP8vqNwy6JeK0A==}
-    engines: {node: '>= 12'}
+  marked@18.0.14:
+    resolution: {integrity: sha512-mBHK6FBHuBAlhgRe88w9F0O1AbwwXJUcQibUbC/QcdTbVGAD7aWza+xt3N6oT/jCZx3/OMeS+8rnuiHZcQ9s7A==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   math-intrinsics@1.1.0:
@@ -1899,7 +1899,7 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
 
-  marked@4.3.0: {}
+  marked@18.0.14: {}
 
   math-intrinsics@1.1.0: {}
 
