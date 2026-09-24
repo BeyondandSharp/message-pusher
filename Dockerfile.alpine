@@ -33,7 +33,9 @@ RUN VITE_APP_VERSION="${VERSION}" pnpm run build
 FROM golang:1.26-alpine AS backend
 
 ARG VERSION=dev
-ARG GOPROXY=https://proxy.golang.org,direct
+# Go 模块代理：默认走局域网里的 Athens 缓存代理（实测冷缓存拉全依赖约 10 秒）。
+# 可用 --build-arg GOPROXY=... 覆盖；传空字符串则回落到 Go 自带的 proxy.golang.org。
+ARG GOPROXY=http://192.168.2.12:50100,direct
 ARG APK_PROXY=""
 ARG APT_PROXY=""
 

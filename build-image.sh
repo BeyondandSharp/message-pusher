@@ -10,11 +10,12 @@
 #   ./build-image.sh --no-save              # 只构建镜像，不导出镜像文件
 #
 # 依赖：pnpm（构建前端）、docker（构建并导出镜像）。
-# 若 Go 模块下载慢，可以指定代理，例如：
-#   GOPROXY=https://goproxy.cn,direct ./build-image.sh
 #
-# apk / apt 的包缓存代理默认是 http://192.168.2.12:3142，
-# 可用 APK_PROXY / APT_PROXY 覆盖，设为空字符串则禁用（APK_PROXY= ./build-image.sh）。
+# 三类包下载代理都默认指向局域网里的缓存服务，均可用环境变量覆盖，
+# 设为空字符串则改用默认源（例如 APK_PROXY= ./build-image.sh）：
+#   apk / apt 包缓存：http://192.168.2.12:3142   （APK_PROXY / APT_PROXY）
+#   Go 模块代理：http://192.168.2.12:50100      （GOPROXY，局域网内的 Athens）
+# 如需换成公网代理：GOPROXY=https://goproxy.cn,direct ./build-image.sh
 
 set -euo pipefail
 
@@ -126,14 +127,15 @@ fi
 # 例如：APK_PROXY= ./build-image.sh
 APK_PROXY="${APK_PROXY-http://192.168.2.12:3142}"
 APT_PROXY="${APT_PROXY-http://192.168.2.12:3142}"
+# Go 模块代理：默认走局域网里的 Athens；设为空字符串则用 Go 自带默认（proxy.golang.org）
+GOPROXY="${GOPROXY-http://192.168.2.12:50100,direct}"
 
 BUILD_ARGS=(--build-arg "VERSION=${VERSION}" \
             --build-arg "APK_PROXY=${APK_PROXY}" \
-            --build-arg "APT_PROXY=${APT_PROXY}")
-if [[ -n "${GOPROXY:-}" ]]; then
-  BUILD_ARGS+=(--build-arg "GOPROXY=${GOPROXY}")
-fi
+            --build-arg "APT_PROXY=${APT_PROXY}" \
+            --build-arg "GOPROXY=${GOPROXY}")
 [[ -n "${APK_PROXY}" ]] && echo "==> apk/apt 代理：${APK_PROXY}"
+[[ -n "${GOPROXY}" ]] && echo "==> Go 模块代理：${GOPROXY}"
 
 echo "==> 构建镜像（首次构建需要编译 go-sqlite3，会慢一些）"
 docker build -f Dockerfile.local -t "${IMAGE}" "${BUILD_ARGS[@]}" .

@@ -12,11 +12,12 @@
 #   ./build-image-alpine.sh -o out                 # 指定镜像文件输出目录（默认 dist）
 #   ./build-image-alpine.sh --no-save              # 只构建镜像，不导出镜像文件
 #
-# 若 Go 模块或 npm 下载慢，可以指定代理，例如：
-#   GOPROXY=https://goproxy.cn,direct NPM_REGISTRY=https://registry.npmmirror.com ./build-image-alpine.sh
-#
-# apk / apt 的包缓存代理默认是 http://192.168.2.12:3142，
-# 可用 APK_PROXY / APT_PROXY 覆盖，设为空字符串则禁用（APK_PROXY= ./build-image-alpine.sh）。
+# 三类包下载代理都默认指向局域网里的缓存服务，均可用环境变量覆盖，
+# 设为空字符串则改用默认源：
+#   apk / apt 包缓存：http://192.168.2.12:3142   （APK_PROXY / APT_PROXY）
+#   Go 模块代理：http://192.168.2.12:50100      （GOPROXY，局域网内的 Athens）
+#   npm registry：默认官方源，可用 NPM_REGISTRY 指定镜像
+# 例如：NPM_REGISTRY=https://registry.npmmirror.com ./build-image-alpine.sh
 
 set -euo pipefail
 
@@ -92,17 +93,18 @@ echo "==> 镜像：${IMAGE}"
 # 例如：APK_PROXY= ./build-image-alpine.sh
 APK_PROXY="${APK_PROXY-http://192.168.2.12:3142}"
 APT_PROXY="${APT_PROXY-http://192.168.2.12:3142}"
+# Go 模块代理：默认走局域网里的 Athens；设为空字符串则用 Go 自带默认（proxy.golang.org）
+GOPROXY="${GOPROXY-http://192.168.2.12:50100,direct}"
 
 BUILD_ARGS=(--build-arg "VERSION=${VERSION}" \
             --build-arg "APK_PROXY=${APK_PROXY}" \
-            --build-arg "APT_PROXY=${APT_PROXY}")
-if [[ -n "${GOPROXY:-}" ]]; then
-  BUILD_ARGS+=(--build-arg "GOPROXY=${GOPROXY}")
-fi
+            --build-arg "APT_PROXY=${APT_PROXY}" \
+            --build-arg "GOPROXY=${GOPROXY}")
 if [[ -n "${NPM_REGISTRY:-}" ]]; then
   BUILD_ARGS+=(--build-arg "NPM_REGISTRY=${NPM_REGISTRY}")
 fi
 [[ -n "${APK_PROXY}" ]] && echo "==> apk/apt 代理：${APK_PROXY}"
+[[ -n "${GOPROXY}" ]] && echo "==> Go 模块代理：${GOPROXY}"
 
 echo "==> 构建镜像（前端 pnpm 依赖 + go-sqlite3 都在容器内编译，首次会比较慢）"
 docker build -f Dockerfile.alpine -t "${IMAGE}" "${BUILD_ARGS[@]}" .
