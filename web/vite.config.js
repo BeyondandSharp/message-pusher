@@ -22,7 +22,9 @@ export default defineConfig(({ mode }) => ({
     // 而且依赖变动频率远低于业务代码，升级依赖时业务 chunk 的缓存依然有效。
     rolldownOptions: {
       output: {
-        advancedChunks: {
+        // 注意：rolldown 里这个选项的新名字是 codeSplitting，
+        // 旧的 advancedChunks 会打印 “option is deprecated” 警告。
+        codeSplitting: {
           groups: [
             {
               name: 'react',
