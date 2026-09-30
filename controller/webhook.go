@@ -100,14 +100,16 @@ func AddWebhook(c *gin.Context) {
 		return
 	}
 	cleanWebhook := model.Webhook{
-		UserId:        c.GetInt("id"),
-		Name:          webhook_.Name,
-		Status:        common.WebhookStatusEnabled,
-		Link:          common.GetUUID(),
-		CreatedTime:   common.GetTimestamp(),
-		Channel:       webhook_.Channel,
-		ExtractRule:   webhook_.ExtractRule,
-		ConstructRule: webhook_.ConstructRule,
+		UserId:           c.GetInt("id"),
+		Name:             webhook_.Name,
+		Status:           common.WebhookStatusEnabled,
+		Link:             common.GetUUID(),
+		CreatedTime:      common.GetTimestamp(),
+		Channel:          webhook_.Channel,
+		ExtractRule:      webhook_.ExtractRule,
+		ConstructRule:    webhook_.ConstructRule,
+		PreScriptEnabled: webhook_.PreScriptEnabled,
+		PreScript:        webhook_.PreScript,
 	}
 	err = cleanWebhook.Insert()
 	if err != nil {
@@ -171,6 +173,8 @@ func UpdateWebhook(c *gin.Context) {
 		cleanWebhook.ExtractRule = webhook_.ExtractRule
 		cleanWebhook.ConstructRule = webhook_.ConstructRule
 		cleanWebhook.Channel = webhook_.Channel
+		cleanWebhook.PreScriptEnabled = webhook_.PreScriptEnabled
+		cleanWebhook.PreScript = webhook_.PreScript
 	}
 	err = cleanWebhook.Update()
 	if err != nil {
@@ -228,6 +232,35 @@ func TriggerWebhook(c *gin.Context) {
 			"message": "用户已被封禁",
 		})
 		return
+	}
+	// 前置脚本：先用 JS 处理请求数据，再把处理结果交给提取规则和构建规则。
+	// 处理结果会重新序列化成 JSON 文本，因此后面的 gjson 提取、变量替换都不用改动。
+	if webhook.PreScriptEnabled {
+		var input interface{}
+		if err := json.Unmarshal(jsonData, &input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "启用前置脚本时，请求体必须是合法的 JSON：" + err.Error(),
+			})
+			return
+		}
+		output, err := model.RunPreScript(webhook.PreScript, input)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Webhook 前置脚本执行失败：" + err.Error(),
+			})
+			return
+		}
+		processed, err := json.Marshal(output)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Webhook 前置脚本的返回值无法序列化为 JSON：" + err.Error(),
+			})
+			return
+		}
+		reqText = string(processed)
 	}
 	extractRule := make(map[string]string)
 	err = json.Unmarshal([]byte(webhook.ExtractRule), &extractRule)

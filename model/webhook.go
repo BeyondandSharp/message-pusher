@@ -108,6 +108,10 @@ type Webhook struct {
 	ExtractRule   string `json:"extract_rule" gorm:"not null"`              // how we extract key info from the request
 	ConstructRule string `json:"construct_rule" gorm:"not null"`            // how we construct message with the extracted info
 	Channel       string `json:"channel" gorm:"type:varchar(32); not null"` // which channel to send our message
+	// PreScriptEnabled 为真时，先用 PreScript 处理请求数据，再套用提取规则和构建规则
+	PreScriptEnabled bool `json:"pre_script_enabled" gorm:"default:false"`
+	// PreScript 是用户自定义的 JavaScript：定义 main(json) 函数，接收请求 JSON 并返回处理后的 JSON
+	PreScript string `json:"pre_script" gorm:"type:text; not null; default:''"`
 }
 
 func GetWebhookById(id int, userId int) (*Webhook, error) {
@@ -165,7 +169,7 @@ func (webhook *Webhook) UpdateStatus(status int) error {
 // Update Make sure your token's fields is completed, because this will update zero values
 func (webhook *Webhook) Update() error {
 	var err error
-	err = DB.Model(webhook).Select("status", "name", "extract_rule", "construct_rule", "channel").Updates(webhook).Error
+	err = DB.Model(webhook).Select("status", "name", "extract_rule", "construct_rule", "channel", "pre_script_enabled", "pre_script").Updates(webhook).Error
 	return err
 }
 

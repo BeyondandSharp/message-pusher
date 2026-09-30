@@ -1,9 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Select, Typography } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Form,
+  Input,
+  Select,
+  Typography,
+} from 'antd';
 import { useParams } from 'react-router-dom';
 import FormGroup from '../../components/FormGroup';
 import { API, showError, showSuccess, verifyJSON } from '../../helpers';
 import { loadUserChannels } from '../../helpers/loader';
+
+// 前置脚本的默认内容：演示写法，处理之后的结果与输入完全一致（浅拷贝）。
+const DEFAULT_PRE_SCRIPT = `// 前置脚本：用 JavaScript 处理本次请求的 JSON，处理结果会作为「提取规则」和「构建规则」的输入。
+// 需要定义 main(json) 函数：json 是请求体（对象 / 数组 / 标量），用 return 返回处理后的数据。
+// 可以在这里改字段名、拼字符串、过滤数组等等。
+// 下面这个默认脚本把输入浅拷贝一份后返回，结果与输入一致，可以作为写法参考。
+function main(json) {
+  if (Array.isArray(json)) {
+    return json.slice();
+  }
+  if (json !== null && typeof json === 'object') {
+    return Object.assign({}, json);
+  }
+  return json;
+}`;
 
 const EditWebhook = () => {
   const params = useParams();
@@ -26,10 +50,19 @@ const EditWebhook = () => {
       '  "url": "https://example.com/$title"\n' +
       '}',
     channel: 'default',
+    pre_script_enabled: false,
+    pre_script: DEFAULT_PRE_SCRIPT,
   };
 
   const [inputs, setInputs] = useState(originInputs);
-  const { name, extract_rule, construct_rule, channel } = inputs;
+  const {
+    name,
+    extract_rule,
+    construct_rule,
+    channel,
+    pre_script_enabled,
+    pre_script,
+  } = inputs;
   let [channels, setChannels] = useState([]);
 
   const handleInputChange = (e) => {
@@ -43,6 +76,10 @@ const EditWebhook = () => {
     if (success) {
       if (data.channel === '') {
         data.channel = 'default';
+      }
+      if (!data.pre_script) {
+        // 老数据没有前置脚本，给个默认内容方便直接改
+        data.pre_script = DEFAULT_PRE_SCRIPT;
       }
       setInputs(data);
     } else {
@@ -78,6 +115,10 @@ const EditWebhook = () => {
     }
     if (!verifyJSON(construct_rule)) {
       showError('构造规则不是合法的 JSON 格式！');
+      return;
+    }
+    if (pre_script_enabled && !(pre_script || '').trim()) {
+      showError('启用了前置脚本，但脚本内容为空！');
       return;
     }
     let res = undefined;
@@ -146,10 +187,39 @@ const EditWebhook = () => {
                 >
                   此教程
                 </a>
-                。
+                。前置脚本在提取规则、构建规则之前执行，用 JavaScript
+                处理请求数据，处理结果会作为后两者的输入。
               </>
             }
           />
+          <Form.Item>
+            <Checkbox
+              checked={pre_script_enabled}
+              onChange={(e) =>
+                setInputs((inputs) => ({
+                  ...inputs,
+                  pre_script_enabled: e.target.checked,
+                }))
+              }
+            >
+              启用前置脚本（在提取规则和构建规则之前，用 JavaScript
+              处理请求数据）
+            </Checkbox>
+          </Form.Item>
+          {pre_script_enabled && (
+            <FormGroup>
+              <Form.Item label='前置脚本'>
+                <Input.TextArea
+                  placeholder='在此输入 JavaScript，需要定义 main(json) 函数，并 return 处理后的数据'
+                  value={pre_script}
+                  name='pre_script'
+                  onChange={handleInputChange}
+                  autoSize={{ minRows: 12, maxRows: 24 }}
+                  style={{ fontFamily: 'JetBrains Mono, Consolas' }}
+                />
+              </Form.Item>
+            </FormGroup>
+          )}
           <FormGroup>
             <Form.Item label='提取规则'>
               <Input.TextArea
