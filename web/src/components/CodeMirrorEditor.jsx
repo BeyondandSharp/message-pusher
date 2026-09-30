@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
@@ -42,25 +42,34 @@ const CodeMirrorEditor = ({
   minHeight,
   maxHeight,
   placeholder,
-}) => (
-  <CodeMirror
-    value={value || ''}
-    minHeight={`${minHeight}px`}
-    maxHeight={`${maxHeight}px`}
-    placeholder={placeholder}
-    extensions={[...(languageExtensions[language] || []), editorTheme]}
-    onChange={onChange}
-    basicSetup={{
-      lineNumbers: true,
-      foldGutter: true,
-      highlightActiveLine: true,
-      highlightActiveLineGutter: true,
-      bracketMatching: true,
-      closeBrackets: true,
-      autocompletion: false,
-      highlightSelectionMatches: false,
-    }}
-  />
-);
+}) => {
+  // 必须记忆化：@uiw/react-codemirror 里有「extensions 变化就 reconfigure」的 effect，
+  // 每次渲染都传新数组会不断 reconfigure，并借 onUpdate 把旧内容回灌给 onChange，
+  // 与外部传入的新 value 互相覆盖（表现为格式化后编辑器内容不更新）。
+  const extensions = useMemo(
+    () => [...(languageExtensions[language] || []), editorTheme],
+    [language],
+  );
+  return (
+    <CodeMirror
+      value={value || ''}
+      minHeight={`${minHeight}px`}
+      maxHeight={`${maxHeight}px`}
+      placeholder={placeholder}
+      extensions={extensions}
+      onChange={onChange}
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+        highlightActiveLineGutter: true,
+        bracketMatching: true,
+        closeBrackets: true,
+        autocompletion: false,
+        highlightSelectionMatches: false,
+      }}
+    />
+  );
+};
 
 export default CodeMirrorEditor;
