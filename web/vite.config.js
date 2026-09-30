@@ -52,6 +52,12 @@ export default defineConfig(({ mode }) => ({
               name: 'antd',
               test: /[\\/]node_modules[\\/](antd|@rc-component|rc-[a-z-]+)[\\/]/,
             },
+            // 代码编辑器（CodeMirror 6 及其词法分析器）只被「接口配置 / 消息编辑 /
+            // 通道配置」等懒加载路由用到，单独成包后首屏不会带上它（约 600 kB）。
+            {
+              name: 'codemirror',
+              test: /[\\/]node_modules[\\/](@codemirror|@lezer|@uiw|crelt|style-mod|w3c-keyname)[\\/]/,
+            },
             { name: 'vendor', test: /[\\/]node_modules[\\/]/ },
           ],
         },

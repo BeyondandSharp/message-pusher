@@ -11,6 +11,7 @@ import {
 } from 'antd';
 import { useParams } from 'react-router-dom';
 import FormGroup from '../../components/FormGroup';
+import CodeEditor from '../../components/CodeEditor';
 import { API, generateToken, showError, showSuccess } from '../../helpers';
 import { CHANNEL_OPTIONS } from '../../constants';
 import axios from 'axios';
@@ -746,15 +747,12 @@ const EditChannel = () => {
             </FormGroup>
             <FormGroup>
               <Form.Item label='请求体'>
-                <Input.TextArea
+                <CodeEditor
                   placeholder='在此输入请求体，支持模板变量，必须为合法的 JSON 格式'
                   value={inputs.other}
-                  name='other'
-                  onChange={handleInputChange}
-                  style={{
-                    minHeight: 200,
-                    fontFamily: 'JetBrains Mono, Consolas',
-                  }}
+                  language='json'
+                  minHeight={200}
+                  onChange={handleSelectChange('other')}
                 />
               </Form.Item>
             </FormGroup>

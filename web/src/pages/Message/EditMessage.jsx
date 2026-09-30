@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { API, showError, showSuccess } from '../../helpers';
 import { loadUser, loadUserChannels } from '../../helpers/loader';
 import FormGroup from '../../components/FormGroup';
+import CodeEditor from '../../components/CodeEditor';
 
 const JSON_MSG_TYPE_OPTIONS = [
   { label: '消息卡片 interactive', value: 'interactive' },
@@ -181,19 +182,16 @@ const EditMessage = () => {
           </FormGroup>
           <FormGroup>
             <Form.Item label='内容'>
-              <Input.TextArea
+              <CodeEditor
                 placeholder={
                   jsonMode
                     ? '请输入 JSON 内容，例如 {"image_key":"img_xxx"}'
                     : '请输入消息内容'
                 }
                 value={inputs.content}
-                name='content'
-                onChange={handleInputChange}
-                style={{
-                  minHeight: 200,
-                  fontFamily: 'JetBrains Mono, Consolas',
-                }}
+                language={jsonMode ? 'json' : 'markdown'}
+                minHeight={200}
+                onChange={(value) => setInputValue('content', value)}
               />
             </Form.Item>
           </FormGroup>

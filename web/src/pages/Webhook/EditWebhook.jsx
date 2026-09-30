@@ -11,6 +11,7 @@ import {
 } from 'antd';
 import { useParams } from 'react-router-dom';
 import FormGroup from '../../components/FormGroup';
+import CodeEditor from '../../components/CodeEditor';
 import { API, showError, showSuccess, verifyJSON } from '../../helpers';
 import { loadUserChannels } from '../../helpers/loader';
 
@@ -67,6 +68,11 @@ const EditWebhook = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    setInputs((inputs) => ({ ...inputs, [name]: value }));
+  };
+
+  // 代码编辑框直接给值，不走事件对象
+  const setInputValue = (name, value) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
@@ -209,42 +215,35 @@ const EditWebhook = () => {
           {pre_script_enabled && (
             <FormGroup>
               <Form.Item label='前置脚本'>
-                <Input.TextArea
+                <CodeEditor
                   placeholder='在此输入 JavaScript，需要定义 main(json) 函数，并 return 处理后的数据'
                   value={pre_script}
-                  name='pre_script'
-                  onChange={handleInputChange}
-                  autoSize={{ minRows: 12, maxRows: 24 }}
-                  style={{ fontFamily: 'JetBrains Mono, Consolas' }}
+                  language='javascript'
+                  minHeight={220}
+                  onChange={(value) => setInputValue('pre_script', value)}
                 />
               </Form.Item>
             </FormGroup>
           )}
           <FormGroup>
             <Form.Item label='提取规则'>
-              <Input.TextArea
+              <CodeEditor
                 placeholder='在此输入提取规则，为一个 JSON，键为模板变量，值为 JSONPath 表达式'
                 value={inputs.extract_rule}
-                name='extract_rule'
-                onChange={handleInputChange}
-                style={{
-                  minHeight: 200,
-                  fontFamily: 'JetBrains Mono, Consolas',
-                }}
+                language='json'
+                minHeight={200}
+                onChange={(value) => setInputValue('extract_rule', value)}
               />
             </Form.Item>
           </FormGroup>
           <FormGroup>
             <Form.Item label='构建规则'>
-              <Input.TextArea
+              <CodeEditor
                 placeholder='在此输入构建规则，键为 title / description / content / url；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
                 value={inputs.construct_rule}
-                name='construct_rule'
-                onChange={handleInputChange}
-                style={{
-                  minHeight: 200,
-                  fontFamily: 'JetBrains Mono, Consolas',
-                }}
+                language='json'
+                minHeight={200}
+                onChange={(value) => setInputValue('construct_rule', value)}
               />
             </Form.Item>
           </FormGroup>

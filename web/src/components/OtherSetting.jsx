@@ -11,6 +11,7 @@ import {
   Typography,
 } from 'antd';
 import FormGroup from './FormGroup';
+import CodeEditor from './CodeEditor';
 import { API, showError, showSuccess } from '../helpers';
 import { marked } from 'marked';
 
@@ -65,6 +66,11 @@ const OtherSetting = () => {
 
   const handleInputChange = async (e) => {
     const { name, value } = e.target;
+    setInputs((inputs) => ({ ...inputs, [name]: value }));
+  };
+
+  // 代码编辑框直接给值，不走事件对象
+  const setInputValue = (name, value) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
@@ -149,15 +155,12 @@ const OtherSetting = () => {
             </Button>
             <FormGroup>
               <Form.Item label='关于'>
-                <Input.TextArea
+                <CodeEditor
                   placeholder='在此输入新的关于内容，支持 Markdown & HTML 代码'
                   value={inputs.About}
-                  name='About'
-                  onChange={handleInputChange}
-                  style={{
-                    minHeight: 150,
-                    fontFamily: 'JetBrains Mono, Consolas',
-                  }}
+                  language='markdown'
+                  minHeight={150}
+                  onChange={(value) => setInputValue('About', value)}
                 />
               </Form.Item>
             </FormGroup>
