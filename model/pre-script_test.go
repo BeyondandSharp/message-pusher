@@ -33,8 +33,8 @@ func runPreScriptToString(t *testing.T, script string, input interface{}) (strin
 // runPreScriptSend 只关心第二项返回值：本次是否发送消息
 func runPreScriptSend(t *testing.T, script string) (bool, error) {
 	t.Helper()
-	_, send, err := RunPreScript(script, map[string]interface{}{"a": 1})
-	return send, err
+	_, __msg_send__, err := RunPreScript(script, map[string]interface{}{"a": 1})
+	return __msg_send__, err
 }
 
 func TestRunPreScript(t *testing.T) {
@@ -104,64 +104,64 @@ func TestRunPreScriptSendFlag(t *testing.T) {
 		want   bool
 	}{
 		{
-			name:   "不涉及 send：默认为 true",
+			name:   "不涉及 __msg_send__：默认为 true",
 			script: `function main(json) { return json; }`,
 			want:   true,
 		},
 		{
 			name: "main 内隐式赋值 false",
 			script: `function main(json) {
-  if (json.a === 1) { send = false; }
+  if (json.a === 1) { __msg_send__ = false; }
   return json;
 }`,
 			want: false,
 		},
 		{
-			name: "顶层 var send = false",
-			script: `var send = false;
+			name: "顶层 var __msg_send__ = false",
+			script: `var __msg_send__ = false;
 function main(json) { return json; }`,
 			want: false,
 		},
 		{
-			name: "顶层 let send = false",
-			script: `let send = false;
+			name: "顶层 let __msg_send__ = false",
+			script: `let __msg_send__ = false;
 function main(json) { return json; }`,
 			want: false,
 		},
 		{
-			name: "顶层 const send = false",
-			script: `const send = false;
+			name: "顶层 const __msg_send__ = false",
+			script: `const __msg_send__ = false;
 function main(json) { return json; }`,
 			want: false,
 		},
 		{
-			name:   "显式 send = true",
-			script: `function main(json) { send = true; return json; }`,
+			name:   "显式 __msg_send__ = true",
+			script: `function main(json) { __msg_send__ = true; return json; }`,
 			want:   true,
 		},
 		{
 			name:   "main 内先设 false 再设回 true",
-			script: `function main(json) { send = false; send = true; return json; }`,
+			script: `function main(json) { __msg_send__ = false; __msg_send__ = true; return json; }`,
 			want:   true,
 		},
 		{
 			name:   "假值 0 视为不发送",
-			script: `function main(json) { send = 0; return json; }`,
+			script: `function main(json) { __msg_send__ = 0; return json; }`,
 			want:   false,
 		},
 		{
 			name:   "空字符串视为不发送",
-			script: `function main(json) { send = ''; return json; }`,
+			script: `function main(json) { __msg_send__ = ''; return json; }`,
 			want:   false,
 		},
 		{
 			name:   "null 视为不发送",
-			script: `function main(json) { send = null; return json; }`,
+			script: `function main(json) { __msg_send__ = null; return json; }`,
 			want:   false,
 		},
 		{
 			name:   "非空字符串按 JS 真值处理，仍然发送",
-			script: `function main(json) { send = 'no'; return json; }`,
+			script: `function main(json) { __msg_send__ = 'no'; return json; }`,
 			want:   true,
 		},
 	}
@@ -172,7 +172,7 @@ function main(json) { return json; }`,
 				t.Fatalf("执行失败：%v", err)
 			}
 			if got != tt.want {
-				t.Errorf("send 应为 %v，实际为 %v", tt.want, got)
+				t.Errorf("__msg_send__ 应为 %v，实际为 %v", tt.want, got)
 			}
 		})
 	}
@@ -180,12 +180,12 @@ function main(json) { return json; }`,
 
 func TestRunPreScriptWithoutReturn(t *testing.T) {
 	// 跳过发送时返回值用不到，允许 main 什么都不返回
-	send, err := runPreScriptSend(t, `function main(json) { send = false; }`)
+	__msg_send__, err := runPreScriptSend(t, `function main(json) { __msg_send__ = false; }`)
 	if err != nil {
 		t.Fatalf("跳过发送时不应报错：%v", err)
 	}
-	if send {
-		t.Errorf("send 应为 false")
+	if __msg_send__ {
+		t.Errorf("__msg_send__ 应为 false")
 	}
 	// 需要发送时仍然要求有返回值
 	if _, err := runPreScriptSend(t, `function main(json) { var a = 1; }`); err == nil {

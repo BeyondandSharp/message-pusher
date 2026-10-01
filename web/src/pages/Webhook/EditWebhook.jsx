@@ -18,21 +18,15 @@ import { loadUserChannels } from '../../helpers/loader';
 // 前置脚本的默认内容：演示写法，处理之后的结果与输入完全一致（浅拷贝）。
 const DEFAULT_PRE_SCRIPT = `// 前置脚本：用 JavaScript 处理本次请求的 JSON，处理结果会作为「提取规则」和「构建规则」的输入。
 // 需要定义 main(json) 函数：json 是请求体（对象 / 数组 / 标量），用 return 返回处理后的数据。
-// 变量 send 控制本次是否真的发送消息：默认为 true，设为 false（或 0 / '' / null 等假值）时
-// 只把结果返回给调用方、不发送消息。写在顶层或 main 里都可以，例如：
-//   function main(json) {
-//     if (!json.title) { send = false; return json; }
-//     return json;
-//   }
-// 可以在这里改字段名、拼字符串、过滤数组等等。
-// 下面这个默认脚本把输入浅拷贝一份后返回，结果与输入一致，可以作为写法参考。
+// 变量 __msg_send__ 控制本次是否真的发送消息：默认为 true，设为 false（或 0 / '' / null 等假值）时
+// 只把结果返回给调用方、不发送消息。写在顶层或 main 里都可以。
+// 下面这个默认脚本演示两件事：把 title 编辑成「【消息】+ 原 title」，
+// 以及显式把 __msg_send__ 设为 true；除 title 的值以外，返回的数据结构与输入完全一致。
 function main(json) {
-  if (Array.isArray(json)) {
-    return json.slice();
+  if (json !== null && typeof json === 'object' && !Array.isArray(json)) {
+    json.title = '【消息】' + (json.title === undefined ? '' : json.title);
   }
-  if (json !== null && typeof json === 'object') {
-    return Object.assign({}, json);
-  }
+  __msg_send__ = true;
   return json;
 }`;
 
@@ -200,8 +194,8 @@ const EditWebhook = () => {
                   此教程
                 </a>
                 。前置脚本在提取规则、构建规则之前执行，用 JavaScript
-                处理请求数据，处理结果会作为后两者的输入；脚本里可以用 send
-                变量控制本次是否发送消息（默认 true，设为 false
+                处理请求数据，处理结果会作为后两者的输入；脚本里可以用
+                __msg_send__ 变量控制本次是否发送消息（默认 true，设为 false
                 则只返回结果、不发送）。
               </>
             }
@@ -222,9 +216,9 @@ const EditWebhook = () => {
           </Form.Item>
           {pre_script_enabled && (
             <FormGroup>
-              <Form.Item label='前置脚本（send 控制是否发送，默认 true）'>
+              <Form.Item label='前置脚本（__msg_send__ 控制是否发送，默认 true）'>
                 <CodeEditor
-                  placeholder='在此输入 JavaScript：需要定义 main(json) 函数并 return 处理后的数据；把 send 设为 false 可跳过本次发送'
+                  placeholder='在此输入 JavaScript：需要定义 main(json) 函数并 return 处理后的数据；把 __msg_send__ 设为 false 可跳过本次发送'
                   value={pre_script}
                   language='javascript'
                   minHeight={220}

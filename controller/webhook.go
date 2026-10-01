@@ -252,12 +252,12 @@ func TriggerWebhook(c *gin.Context) {
 			})
 			return
 		}
-		// 脚本通过 send = false（或其它假值）要求跳过本次发送：
+		// 脚本通过 __msg_send__ = false（或其它假值）要求跳过本次发送：
 		// 不发送消息、不写消息记录，也不跑后续的提取规则和构建规则
 		if !send {
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
-				"message": "前置脚本要求跳过发送（send = false）",
+				"message": "前置脚本要求跳过发送（__msg_send__ = false）",
 				"skipped": true,
 			})
 			return
