@@ -5,25 +5,20 @@ import { javascript } from '@codemirror/lang-javascript';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { EditorView } from '@codemirror/view';
+import { vscodeLight } from '@uiw/codemirror-theme-vscode';
 
-// 与 antd 风格一致的浅色主题
+// 只管排版相关的样式；配色整体交给 vscodeLight 主题，避免两套 EditorView.theme 抢同一批属性。
+// 主题没处理活动行，这里保留一个浅色下也协调的淡色背景。
 const editorTheme = EditorView.theme({
   '&': {
     fontSize: '13px',
-    backgroundColor: '#ffffff',
   },
   '.cm-scroller': {
     fontFamily: 'JetBrains Mono, Consolas, Menlo, monospace',
     lineHeight: '1.6',
   },
-  '.cm-gutters': {
-    backgroundColor: '#fafafa',
-    color: '#8c8c8c',
-    borderRight: '1px solid #f0f0f0',
-  },
-  '.cm-activeLine': { backgroundColor: '#f5faff' },
-  '.cm-activeLineGutter': { backgroundColor: '#eaf4ff' },
-  '.cm-content': { caretColor: '#1677ff' },
+  '.cm-activeLine': { backgroundColor: '#f5f7fa' },
+  '.cm-activeLineGutter': { backgroundColor: '#eef1f5' },
 });
 
 const languageExtensions = {
@@ -52,6 +47,7 @@ const CodeMirrorEditor = ({
   );
   return (
     <CodeMirror
+      theme={vscodeLight}
       value={value || ''}
       minHeight={`${minHeight}px`}
       maxHeight={`${maxHeight}px`}
