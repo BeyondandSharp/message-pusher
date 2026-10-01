@@ -92,6 +92,11 @@ code {
   color: #ffffff !important;
 }
 
+/* 两个反色按钮并排时留出间距（发送 / 同步） */
+.btn-invert.ant-btn + .btn-invert.ant-btn {
+  margin-left: 12px !important;
+}
+
 .btn-invert.ant-btn:hover {
   background: #333333 !important;
   border-color: #333333 !important;

@@ -230,6 +230,7 @@ const EditMessage = () => {
             发送
           </Button>
           <Button
+            className='btn-invert'
             onClick={() => {
               setInputValue('async', !async);
             }}
