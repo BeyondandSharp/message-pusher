@@ -89,6 +89,7 @@ code {
 .ant-layout-header .ant-menu-horizontal {
   height: 100%;
   border-bottom: none;
+  gap: 0 !important;
 }
 
 .ant-layout-header .ant-menu-horizontal > .ant-menu-item,
@@ -97,10 +98,15 @@ code {
   align-items: center;
   height: 100%;
   border-bottom: none;
+  /* 导航项之间不留外边距，粗线才能和左右的细线正好接上 */
+  margin: 0 !important;
 }
 
 .ant-layout-header .ant-menu-horizontal > .ant-menu-item::after,
 .ant-layout-header .ant-menu-horizontal > .ant-menu-submenu::after {
+  /* 左右不内缩：粗线铺满整个导航项，两端正好和顶栏的细线接上 */
+  left: 0 !important;
+  right: 0 !important;
   bottom: -1px !important;
   border-bottom-width: 2px !important;
 }
