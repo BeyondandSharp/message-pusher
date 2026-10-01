@@ -244,11 +244,21 @@ func TriggerWebhook(c *gin.Context) {
 			})
 			return
 		}
-		output, err := model.RunPreScript(webhook.PreScript, input)
+		output, send, err := model.RunPreScript(webhook.PreScript, input)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "Webhook 前置脚本执行失败：" + err.Error(),
+			})
+			return
+		}
+		// 脚本通过 send = false（或其它假值）要求跳过本次发送：
+		// 不发送消息、不写消息记录，也不跑后续的提取规则和构建规则
+		if !send {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "前置脚本要求跳过发送（send = false）",
+				"skipped": true,
 			})
 			return
 		}

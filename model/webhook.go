@@ -110,7 +110,8 @@ type Webhook struct {
 	Channel       string `json:"channel" gorm:"type:varchar(32); not null"` // which channel to send our message
 	// PreScriptEnabled 为真时，先用 PreScript 处理请求数据，再套用提取规则和构建规则
 	PreScriptEnabled bool `json:"pre_script_enabled" gorm:"default:false"`
-	// PreScript 是用户自定义的 JavaScript：定义 main(json) 函数，接收请求 JSON 并返回处理后的 JSON
+	// PreScript 是用户自定义的 JavaScript：定义 main(json) 函数，接收请求 JSON 并返回处理后的 JSON；
+	// 其中的全局变量 send（默认 true）控制本次是否真的发送消息
 	PreScript string `json:"pre_script" gorm:"type:text; not null; default:''"`
 }
 

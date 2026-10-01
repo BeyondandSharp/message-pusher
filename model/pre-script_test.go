@@ -19,7 +19,7 @@ func mustJSON(t *testing.T, text string) interface{} {
 
 func runPreScriptToString(t *testing.T, script string, input interface{}) (string, error) {
 	t.Helper()
-	out, err := RunPreScript(script, input)
+	out, _, err := RunPreScript(script, input)
 	if err != nil {
 		return "", err
 	}
@@ -28,6 +28,13 @@ func runPreScriptToString(t *testing.T, script string, input interface{}) (strin
 		return "", err
 	}
 	return string(data), nil
+}
+
+// runPreScriptSend 只关心第二项返回值：本次是否发送消息
+func runPreScriptSend(t *testing.T, script string) (bool, error) {
+	t.Helper()
+	_, send, err := RunPreScript(script, map[string]interface{}{"a": 1})
+	return send, err
 }
 
 func TestRunPreScript(t *testing.T) {
@@ -90,8 +97,105 @@ func TestRunPreScript(t *testing.T) {
 	}
 }
 
-func TestRunPreScriptErrors(t *testing.T) {
+func TestRunPreScriptSendFlag(t *testing.T) {
 	cases := []struct {
+		name   string
+		script string
+		want   bool
+	}{
+		{
+			name:   "不涉及 send：默认为 true",
+			script: `function main(json) { return json; }`,
+			want:   true,
+		},
+		{
+			name: "main 内隐式赋值 false",
+			script: `function main(json) {
+  if (json.a === 1) { send = false; }
+  return json;
+}`,
+			want: false,
+		},
+		{
+			name: "顶层 var send = false",
+			script: `var send = false;
+function main(json) { return json; }`,
+			want: false,
+		},
+		{
+			name: "顶层 let send = false",
+			script: `let send = false;
+function main(json) { return json; }`,
+			want: false,
+		},
+		{
+			name: "顶层 const send = false",
+			script: `const send = false;
+function main(json) { return json; }`,
+			want: false,
+		},
+		{
+			name:   "显式 send = true",
+			script: `function main(json) { send = true; return json; }`,
+			want:   true,
+		},
+		{
+			name:   "main 内先设 false 再设回 true",
+			script: `function main(json) { send = false; send = true; return json; }`,
+			want:   true,
+		},
+		{
+			name:   "假值 0 视为不发送",
+			script: `function main(json) { send = 0; return json; }`,
+			want:   false,
+		},
+		{
+			name:   "空字符串视为不发送",
+			script: `function main(json) { send = ''; return json; }`,
+			want:   false,
+		},
+		{
+			name:   "null 视为不发送",
+			script: `function main(json) { send = null; return json; }`,
+			want:   false,
+		},
+		{
+			name:   "非空字符串按 JS 真值处理，仍然发送",
+			script: `function main(json) { send = 'no'; return json; }`,
+			want:   true,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := runPreScriptSend(t, tt.script)
+			if err != nil {
+				t.Fatalf("执行失败：%v", err)
+			}
+			if got != tt.want {
+				t.Errorf("send 应为 %v，实际为 %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRunPreScriptWithoutReturn(t *testing.T) {
+	// 跳过发送时返回值用不到，允许 main 什么都不返回
+	send, err := runPreScriptSend(t, `function main(json) { send = false; }`)
+	if err != nil {
+		t.Fatalf("跳过发送时不应报错：%v", err)
+	}
+	if send {
+		t.Errorf("send 应为 false")
+	}
+	// 需要发送时仍然要求有返回值
+	if _, err := runPreScriptSend(t, `function main(json) { var a = 1; }`); err == nil {
+		t.Errorf("需要发送时应报「没有返回值」")
+	} else if !strings.Contains(err.Error(), "没有返回值") {
+		t.Errorf("错误信息应提示没有返回值，实际为 %q", err.Error())
+	}
+}
+
+func TestRunPreScriptErrors(t *testing.T) {	cases := []struct {
 		name    string
 		script  string
 		wantErr string
@@ -112,7 +216,7 @@ func TestRunPreScriptErrors(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := RunPreScript(tt.script, map[string]interface{}{"a": 1})
+			_, _, err := RunPreScript(tt.script, map[string]interface{}{"a": 1})
 			if err == nil {
 				t.Fatalf("期望报错，但执行成功了")
 			}
@@ -125,7 +229,7 @@ func TestRunPreScriptErrors(t *testing.T) {
 
 func TestRunPreScriptTimeout(t *testing.T) {
 	start := time.Now()
-	_, err := RunPreScript("function main(json) { while (true) {} }", map[string]interface{}{})
+	_, _, err := RunPreScript("function main(json) { while (true) {} }", map[string]interface{}{})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("死循环脚本应该被中断")
