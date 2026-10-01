@@ -837,7 +837,12 @@ const EditChannel = () => {
             </Space.Compact>
           </Form.Item>
           {renderChannelForm()}
-          <Button disabled={type === 'email'} onClick={submit}>
+          <Button
+            type='primary'
+            style={{ marginTop: 8 }}
+            disabled={type === 'email' || !name || !name.trim()}
+            onClick={submit}
+          >
             提交
           </Button>
         </Form>

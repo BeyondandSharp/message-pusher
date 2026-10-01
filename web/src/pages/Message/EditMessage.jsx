@@ -226,7 +226,7 @@ const EditMessage = () => {
               />
             </Form.Item>
           </FormGroup>
-          <Button htmlType='submit' onClick={send}>
+          <Button className='btn-invert' htmlType='submit' onClick={send}>
             发送
           </Button>
           <Button

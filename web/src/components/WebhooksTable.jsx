@@ -293,7 +293,7 @@ const WebhooksTable = () => {
         }}
       >
         <Link to='/webhook/add'>
-          <Button size='small' loading={loading}>
+          <Button type='link' size='small' loading={loading}>
             添加新的接口
           </Button>
         </Link>

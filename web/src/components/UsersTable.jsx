@@ -320,7 +320,7 @@ const UsersTable = () => {
         }}
       >
         <Link to='/user/add'>
-          <Button size='small' loading={loading}>
+          <Button type='link' size='small' loading={loading}>
             添加新的用户
           </Button>
         </Link>

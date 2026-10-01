@@ -295,7 +295,7 @@ const ChannelsTable = () => {
         }}
       >
         <Link to='/channel/add'>
-          <Button size='small' loading={loading}>
+          <Button type='link' size='small' loading={loading}>
             添加新的通道
           </Button>
         </Link>
