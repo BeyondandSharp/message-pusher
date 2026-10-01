@@ -1,11 +1,6 @@
 import React from 'react';
-import { Button, Dropdown, Tooltip } from 'antd';
-import {
-  DesktopOutlined,
-  DownOutlined,
-  MoonOutlined,
-  SunOutlined,
-} from '@ant-design/icons';
+import { Button, Dropdown } from 'antd';
+import { DesktopOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import { useTheme } from '../context/Theme';
 
 const MODE_ICONS = {
@@ -21,6 +16,7 @@ const MODE_LABELS = {
 };
 
 // 主题切换：右上角、用户名左侧。三个选项：亮 / 暗 / 系统（默认跟随系统）。
+// 按反馈：不加悬浮注释；按钮收窄（去掉箭头、减小左右内边距），并与右侧的登录/用户名保持间距。
 const ThemeSwitch = () => {
   const { state, dispatch } = useTheme();
   const mode = state.mode;
@@ -38,11 +34,14 @@ const ThemeSwitch = () => {
         onClick: ({ key }) => dispatch({ type: 'set', payload: key }),
       }}
     >
-      <Tooltip title={`主题：${MODE_LABELS[mode]}`}>
-        <Button type='text' icon={MODE_ICONS[mode]}>
-          {MODE_LABELS[mode]} <DownOutlined style={{ fontSize: 10 }} />
-        </Button>
-      </Tooltip>
+      <Button
+        type='text'
+        icon={MODE_ICONS[mode]}
+        style={{ padding: '0 8px', marginRight: 12 }}
+        aria-label='切换主题'
+      >
+        {MODE_LABELS[mode]}
+      </Button>
     </Dropdown>
   );
 };
