@@ -3,6 +3,13 @@ import { Card, Col, Row, Typography } from 'antd';
 import { API, showError, showNotice, timestamp2string } from '../../helpers';
 import { StatusContext } from '../../context/Status';
 
+// 系统配置总览里的启用状态：已启用用绿色、未启用用红色（用 antd 的语义色，跟随亮暗主题）
+const renderSwitchState = (enabled) => (
+  <Typography.Text type={enabled ? 'success' : 'danger'}>
+    {enabled ? '已启用' : '未启用'}
+  </Typography.Text>
+);
+
 const Home = () => {
   const [statusState, statusDispatch] = useContext(StatusContext);
   const homePageLink = localStorage.getItem('home_page_link') || '';
@@ -85,39 +92,39 @@ const Home = () => {
                 >
                   <p>
                     邮箱验证：
-                    {statusState?.status?.email_verification === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.email_verification === true,
+                    )}
                   </p>
                   <p>
                     GitHub 身份验证：
-                    {statusState?.status?.github_oauth === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.github_oauth === true,
+                    )}
                   </p>
                   <p>
                     微信身份验证：
-                    {statusState?.status?.wechat_login === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.wechat_login === true,
+                    )}
                   </p>
                   <p>
                     Turnstile 用户校验：
-                    {statusState?.status?.turnstile_check === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.turnstile_check === true,
+                    )}
                   </p>
                   <p>
                     全局消息持久化：
-                    {statusState?.status?.message_persistence === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.message_persistence === true,
+                    )}
                   </p>
                   <p>
                     全局消息渲染：
-                    {statusState?.status?.message_render === true
-                      ? '已启用'
-                      : '未启用'}
+                    {renderSwitchState(
+                      statusState?.status?.message_render === true,
+                    )}
                   </p>
                 </Card>
               </Col>

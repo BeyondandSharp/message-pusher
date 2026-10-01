@@ -83,3 +83,24 @@ code {
 .code-block:hover .code-actions {
   opacity: 1;
 }
+
+/* 顶栏导航：让水平菜单撑满头栏高度，选中项的下划线压到头栏 1px 底边上，
+   两者落在同一条线上（参考 GitHub 的标签栏）。 */
+.ant-layout-header .ant-menu-horizontal {
+  height: 100%;
+  border-bottom: none;
+}
+
+.ant-layout-header .ant-menu-horizontal > .ant-menu-item,
+.ant-layout-header .ant-menu-horizontal > .ant-menu-submenu {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  border-bottom: none;
+}
+
+.ant-layout-header .ant-menu-horizontal > .ant-menu-item::after,
+.ant-layout-header .ant-menu-horizontal > .ant-menu-submenu::after {
+  bottom: -1px !important;
+  border-bottom-width: 2px !important;
+}

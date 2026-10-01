@@ -98,25 +98,6 @@ const WebhooksTable = () => {
     }
   };
 
-  const renderStatus = (status) => {
-    switch (status) {
-      case 1:
-        return <Tag variant='outlined'>已启用</Tag>;
-      case 2:
-        return (
-          <Tag variant='outlined' color='red'>
-            已禁用
-          </Tag>
-        );
-      default:
-        return (
-          <Tag variant='outlined' color='default'>
-            未知状态
-          </Tag>
-        );
-    }
-  };
-
   const searchWebhooks = async () => {
     if (searchKeyword === '') {
       // if keyword is blank, load files instead.

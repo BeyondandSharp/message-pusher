@@ -97,25 +97,6 @@ const UsersTable = () => {
     })();
   };
 
-  const renderStatus = (status) => {
-    switch (status) {
-      case 1:
-        return <Tag variant='outlined'>已激活</Tag>;
-      case 2:
-        return (
-          <Tag variant='outlined' color='red'>
-            已封禁
-          </Tag>
-        );
-      default:
-        return (
-          <Tag variant='outlined' color='default'>
-            未知状态
-          </Tag>
-        );
-    }
-  };
-
   const searchUsers = async () => {
     if (searchKeyword === '') {
       // if keyword is blank, load files instead.
