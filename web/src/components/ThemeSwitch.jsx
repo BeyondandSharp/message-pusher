@@ -10,13 +10,14 @@ const MODE_ICONS = {
 };
 
 const MODE_LABELS = {
-  light: '亮',
-  dark: '暗',
-  system: '系统',
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统',
 };
 
-// 主题切换：右上角、用户名左侧。三个选项：亮 / 暗 / 系统（默认跟随系统）。
-// 按反馈：不加悬浮注释；按钮收窄（去掉箭头、减小左右内边距），并与右侧的登录/用户名保持间距。
+// 主题切换：右上角、用户名左侧。
+// 按反馈：按钮只显示图标（不带文字、不加悬浮注释，点击后才在菜单里看到选项文字）；
+// 三个选项为 浅色 / 深色 / 跟随系统（默认跟随系统）。
 const ThemeSwitch = () => {
   const { state, dispatch } = useTheme();
   const mode = state.mode;
@@ -25,9 +26,9 @@ const ThemeSwitch = () => {
       trigger={['click']}
       menu={{
         items: [
-          { key: 'light', icon: <SunOutlined />, label: '亮' },
-          { key: 'dark', icon: <MoonOutlined />, label: '暗' },
-          { key: 'system', icon: <DesktopOutlined />, label: '系统' },
+          { key: 'light', icon: <SunOutlined />, label: '浅色' },
+          { key: 'dark', icon: <MoonOutlined />, label: '深色' },
+          { key: 'system', icon: <DesktopOutlined />, label: '跟随系统' },
         ],
         selectable: true,
         selectedKeys: [mode],
@@ -39,9 +40,7 @@ const ThemeSwitch = () => {
         icon={MODE_ICONS[mode]}
         style={{ padding: '0 8px', marginRight: 12 }}
         aria-label='切换主题'
-      >
-        {MODE_LABELS[mode]}
-      </Button>
+      />
     </Dropdown>
   );
 };
