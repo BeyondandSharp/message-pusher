@@ -59,4 +59,4 @@ export const THEME_TOKENS = {
 };
 
 // 顶栏高度（index.css 里 body 的 padding-top 与之对应）
-export const HEADER_HEIGHT = 56;
+export const HEADER_HEIGHT = 48;

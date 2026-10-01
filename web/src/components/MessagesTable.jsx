@@ -468,6 +468,7 @@ const MessagesTable = () => {
       >
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
+            className='btn-invert'
             loading={loading}
             onClick={() => {
               refresh().then();

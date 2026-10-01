@@ -20,7 +20,7 @@
 body {
   margin: 0;
   /* 给固定在顶部的 Header 预留高度：56px 内容 + 1px 下边框（见 helpers/theme.js 的 HEADER_HEIGHT） */
-  padding-top: 57px;
+  padding-top: 49px;
   overflow-y: scroll;
   background: var(--page-bg);
   color: var(--page-fg);
@@ -60,9 +60,54 @@ code {
   border-left: 0.25em solid var(--quote-border);
 }
 
-/* antd 的按钮之间没有默认间距，表格操作列里的按钮会挤在一起，这里补上 */
+/* 表格操作列的按钮：去掉外框，彼此拉开距离 */
+.ant-table-cell .ant-btn {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding-inline: 4px !important;
+}
+
 .ant-table-cell .ant-btn + .ant-btn {
-  margin-left: 8px;
+  margin-left: 12px;
+}
+
+/* 分页：序号不要外框，选中项用高亮表示 */
+.ant-pagination .ant-pagination-item {
+  border: none !important;
+}
+
+.ant-pagination .ant-pagination-item-active {
+  background: rgba(22, 119, 255, 0.12) !important;
+}
+
+[data-theme='dark'] .ant-pagination .ant-pagination-item-active {
+  background: rgba(22, 119, 255, 0.26) !important;
+}
+
+/* 反色按钮（刷新 / 发送 / 同步）：暗色下浅底深字，亮色下深底白字 */
+.btn-invert.ant-btn {
+  background: #1f1f1f !important;
+  border-color: #1f1f1f !important;
+  color: #ffffff !important;
+}
+
+.btn-invert.ant-btn:hover {
+  background: #333333 !important;
+  border-color: #333333 !important;
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .btn-invert.ant-btn {
+  background: #f0f0f0 !important;
+  border-color: #f0f0f0 !important;
+  color: rgba(0, 0, 0, 0.88) !important;
+}
+
+[data-theme='dark'] .btn-invert.ant-btn:hover {
+  background: #ffffff !important;
+  border-color: #ffffff !important;
+  color: rgba(0, 0, 0, 0.88) !important;
 }
 
 /* 代码编辑器：右上角操作按钮默认隐藏，鼠标悬浮到代码框上才出现 */

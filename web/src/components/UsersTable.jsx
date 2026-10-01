@@ -206,7 +206,7 @@ const UsersTable = () => {
       render: (_, user) => (
         <div>
           <Button
-            type='primary'
+            type='link'
             size={'small'}
             onClick={() => {
               manageUser(user.username, 'promote', user);

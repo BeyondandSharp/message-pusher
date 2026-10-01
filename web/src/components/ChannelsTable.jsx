@@ -229,7 +229,7 @@ const ChannelsTable = () => {
       render: (_, channel) => (
         <div>
           <Button
-            type='primary'
+            type='link'
             size={'small'}
             onClick={() => {
               testChannel(user.username, user.token, channel.name).then();
@@ -238,7 +238,7 @@ const ChannelsTable = () => {
             测试
           </Button>
           <Link to={'/channel/edit/' + channel.id}>
-            <Button type='primary' size={'small'}>
+            <Button type='link' size={'small'}>
               编辑
             </Button>
           </Link>

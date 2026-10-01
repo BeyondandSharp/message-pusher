@@ -82,7 +82,7 @@ const headerStyle = {
   width: '100%',
   borderBottom: '1px solid var(--header-border)',
   padding: 0,
-  height: 56,
+  height: 48,
   lineHeight: 'normal',
 };
 

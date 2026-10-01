@@ -235,7 +235,7 @@ const WebhooksTable = () => {
               </Button>
             </Tooltip>
             <Link to={'/webhook/edit/' + webhook.id}>
-              <Button type='primary' size={'small'}>
+              <Button type='link' size={'small'}>
                 编辑
               </Button>
             </Link>
