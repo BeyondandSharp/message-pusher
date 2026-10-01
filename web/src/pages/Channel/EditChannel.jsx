@@ -759,14 +759,8 @@ const EditChannel = () => {
           </>
         );
       case 'none':
-        return (
-          <>
-            <Alert>
-              仅保存消息，不做推送，可以在 Web
-              端查看，需要用户具有消息持久化的权限。
-            </Alert>
-          </>
-        );
+        // 「none」类型不再显示提示框（原先那条蓝框提示已按反馈移除）
+        return null;
       default:
         return (
           <>
