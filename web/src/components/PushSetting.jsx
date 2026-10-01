@@ -78,7 +78,7 @@ const PushSetting = () => {
     <Row>
       <Col span={24}>
         <Spin spinning={loading}>
-          <Form>
+          <Form layout='vertical'>
             <Typography.Title level={3}>通用设置</Typography.Title>
             <Alert
               type='info'

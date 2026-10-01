@@ -105,7 +105,7 @@ const LoginForm = () => {
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' /> 用户登录
         </Typography.Title>
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Card>
             <Form.Item>
               <Input
@@ -176,7 +176,7 @@ const LoginForm = () => {
           <div style={{ textAlign: 'center' }}>
             <p>微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）</p>
           </div>
-          <Form size='large'>
+          <Form layout='vertical' size='large'>
             <Form.Item>
               <Input
                 placeholder='验证码'

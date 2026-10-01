@@ -437,7 +437,7 @@ const MessagesTable = () => {
 
   return (
     <>
-      <Form onFinish={searchMessages}>
+      <Form layout='vertical' onFinish={searchMessages}>
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}
@@ -468,16 +468,14 @@ const MessagesTable = () => {
       >
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
-            size='small'
             loading={loading}
             onClick={() => {
               refresh().then();
             }}
           >
-            手动刷新
+            刷新
           </Button>
           <Button
-            size='small'
             loading={loading}
             onClick={() => {
               setAutoRefresh(!autoRefresh);

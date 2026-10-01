@@ -32,7 +32,7 @@ const AddUser = () => {
     <>
       <Card>
         <Typography.Title level={3}>创建新用户账户</Typography.Title>
-        <Form autoComplete='new-password'>
+        <Form layout='vertical' autoComplete='new-password'>
           <Form.Item label='用户名'>
             <Input
               name='username'

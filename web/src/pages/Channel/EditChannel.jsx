@@ -782,7 +782,7 @@ const EditChannel = () => {
         <Typography.Title level={3}>
           {isEditing ? '更新通道配置' : '新建消息通道'}
         </Typography.Title>
-        <Form autoComplete='new-password'>
+        <Form layout='vertical' autoComplete='new-password'>
           <Form.Item label='名称'>
             <Input
               name='name'

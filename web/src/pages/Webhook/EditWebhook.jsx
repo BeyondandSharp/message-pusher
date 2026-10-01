@@ -165,7 +165,7 @@ const EditWebhook = () => {
         <Typography.Title level={3}>
           {isEditing ? '更新接口配置' : '新建消息接口'}
         </Typography.Title>
-        <Form autoComplete='new-password'>
+        <Form layout='vertical' autoComplete='new-password'>
           <Form.Item label='名称'>
             <Input
               name='name'

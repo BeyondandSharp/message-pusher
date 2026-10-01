@@ -140,7 +140,7 @@ const EditMessage = () => {
     <>
       <Card loading={loading}>
         <Typography.Title level={3}>消息编辑</Typography.Title>
-        <Form>
+        <Form layout='vertical'>
           <FormGroup>
             <Form.Item label='标题'>
               <Input

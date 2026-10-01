@@ -61,7 +61,7 @@ const EditUser = () => {
     <>
       <Card loading={loading}>
         <Typography.Title level={3}>更新用户信息</Typography.Title>
-        <Form autoComplete='new-password'>
+        <Form layout='vertical' autoComplete='new-password'>
           <Form.Item label='用户名'>
             <Input
               name='username'

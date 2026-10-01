@@ -47,7 +47,7 @@ const PasswordResetConfirm = () => {
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <img src='/logo.png' alt='logo' /> 密码重置确认
         </Typography.Title>
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Card>
             <Form.Item>
               <Input

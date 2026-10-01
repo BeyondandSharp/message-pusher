@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Input, Pagination, Popconfirm, Table, Tag } from 'antd';
+import {
+  Button,
+  Form,
+  Input,
+  Pagination,
+  Popconfirm,
+  Table,
+  Tag,
+  Switch,
+} from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { API, showError, showSuccess, testChannel } from '../helpers';
@@ -212,7 +221,14 @@ const ChannelsTable = () => {
           sortChannel('status');
         },
       }),
-      render: (status) => renderStatus(status),
+      render: (status, record) => (
+        <Switch
+          checked={status === 1}
+          onChange={(checked) => {
+            manageChannel(record.id, checked ? 'enable' : 'disable').then();
+          }}
+        />
+      ),
     },
     {
       title: '创建时间',
@@ -239,17 +255,6 @@ const ChannelsTable = () => {
             }}
           >
             测试
-          </Button>
-          <Button
-            size={'small'}
-            onClick={() => {
-              manageChannel(
-                channel.id,
-                channel.status === 1 ? 'disable' : 'enable',
-              ).then();
-            }}
-          >
-            {channel.status === 1 ? '禁用' : '启用'}
           </Button>
           <Link to={'/channel/edit/' + channel.id}>
             <Button type='primary' size={'small'}>
@@ -278,7 +283,7 @@ const ChannelsTable = () => {
 
   return (
     <>
-      <Form onFinish={searchChannels}>
+      <Form layout='vertical' onFinish={searchChannels}>
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}

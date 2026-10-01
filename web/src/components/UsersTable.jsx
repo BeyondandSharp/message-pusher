@@ -8,6 +8,7 @@ import {
   Popconfirm,
   Table,
   Tag,
+  Switch,
 } from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -209,7 +210,14 @@ const UsersTable = () => {
           sortUser('status');
         },
       }),
-      render: (status) => renderStatus(status),
+      render: (status, record) => (
+        <Switch
+          checked={status === 1}
+          onChange={(checked) => {
+            manageUser(record.username, checked ? 'enable' : 'disable', record);
+          }}
+        />
+      ),
     },
     {
       title: '操作',
@@ -244,18 +252,6 @@ const UsersTable = () => {
               删除
             </Button>
           </Popconfirm>
-          <Button
-            size={'small'}
-            onClick={() => {
-              manageUser(
-                user.username,
-                user.status === 1 ? 'disable' : 'enable',
-                user,
-              );
-            }}
-          >
-            {user.status === 1 ? '禁用' : '启用'}
-          </Button>
           <Link to={'/user/edit/' + user.id}>
             <Button size={'small'}>编辑</Button>
           </Link>
@@ -312,7 +308,7 @@ const UsersTable = () => {
 
   return (
     <>
-      <Form onFinish={searchUsers}>
+      <Form layout='vertical' onFinish={searchUsers}>
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}

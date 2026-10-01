@@ -138,7 +138,7 @@ const PersonalSetting = () => {
         <div style={{ textAlign: 'center' }}>
           <p>微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）</p>
         </div>
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Form.Item>
             <Input
               placeholder='验证码'
@@ -169,7 +169,7 @@ const PersonalSetting = () => {
         title='绑定邮箱地址'
         footer={null}
       >
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Form.Item>
             <Space.Compact style={{ width: '100%' }}>
               <Input

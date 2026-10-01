@@ -17,6 +17,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import { API, isAdmin, isMobile, showSuccess } from '../helpers';
+import ThemeSwitch from './ThemeSwitch';
 import '../index.css';
 
 // Header Buttons
@@ -72,17 +73,16 @@ const containerStyle = {
 
 const headerStyle = {
   // 固定在页面顶部（index.css 里 body 预留了同等高度的 padding-top）。
-  // 之前在文档流里，加上 body 的 padding-top 就变成顶部一条空白，看起来没贴顶。
+  // 背景色交给 antd 的 Layout.headerBg 令牌（随亮/暗主题变化），这里只留边框。
   position: 'fixed',
   top: 0,
   left: 0,
   right: 0,
   zIndex: 100,
   width: '100%',
-  background: '#fff',
-  borderBottom: '1px solid #f0f0f0',
+  borderBottom: '1px solid var(--header-border)',
   padding: 0,
-  height: 52,
+  height: 56,
   lineHeight: 'normal',
 };
 
@@ -159,12 +159,15 @@ const Header = () => {
                 <b>消息推送服务</b>
               </span>
             </Link>
-            <Button
-              type='text'
-              aria-label='menu'
-              icon={showSidebar ? <CloseOutlined /> : <MenuOutlined />}
-              onClick={toggleSidebar}
-            />
+            <Space>
+              <ThemeSwitch />
+              <Button
+                type='text'
+                aria-label='menu'
+                icon={showSidebar ? <CloseOutlined /> : <MenuOutlined />}
+                onClick={toggleSidebar}
+              />
+            </Space>
           </div>
         </Layout.Header>
         {showSidebar ? (
@@ -246,6 +249,7 @@ const Header = () => {
               background: 'transparent',
             }}
           />
+          <ThemeSwitch />
           {userState.user ? (
             <Dropdown
               menu={{

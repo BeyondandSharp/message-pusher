@@ -105,7 +105,7 @@ const RegisterForm = () => {
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' /> 新用户注册
         </Typography.Title>
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Card>
             <Form.Item>
               <Input
@@ -140,6 +140,7 @@ const RegisterForm = () => {
                     onChange={handleChange}
                     name='email'
                     type='email'
+                    style={{ maxWidth: 360 }}
                     addonAfter={
                       <Button onClick={sendVerificationCode} disabled={loading}>
                         获取验证码
@@ -153,6 +154,7 @@ const RegisterForm = () => {
                     placeholder='输入验证码'
                     onChange={handleChange}
                     name='verification_code'
+                    style={{ maxWidth: 200 }}
                   />
                 </Form.Item>
               </>

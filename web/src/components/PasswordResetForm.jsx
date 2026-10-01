@@ -57,7 +57,7 @@ const PasswordResetForm = () => {
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' preview={false} /> 密码重置
         </Typography.Title>
-        <Form size='large'>
+        <Form layout='vertical' size='large'>
           <Card>
             <Form.Item>
               <Input

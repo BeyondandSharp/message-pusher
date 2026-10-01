@@ -7,6 +7,27 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="消息推送服务" />
     <title>消息推送服务</title>
+    <script>
+      // 在 bundle 之前定好主题，避免深色用户看到白闪（与 src/helpers/theme.js 的规则保持一致）
+      (function () {
+        try {
+          var mode = window.localStorage.getItem('theme') || 'system';
+          var dark =
+            mode === 'dark' ||
+            (mode === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute(
+            'data-theme',
+            dark ? 'dark' : 'light',
+          );
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) {
+            meta.setAttribute('content', dark ? '#1a1a1a' : '#ffffff');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

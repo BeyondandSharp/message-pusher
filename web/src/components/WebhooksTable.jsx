@@ -8,6 +8,7 @@ import {
   Table,
   Tag,
   Tooltip,
+  Switch,
 } from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -197,7 +198,14 @@ const WebhooksTable = () => {
           sortWebhook('status');
         },
       }),
-      render: (status) => renderStatus(status),
+      render: (status, record) => (
+        <Switch
+          checked={status === 1}
+          onChange={(checked) => {
+            manageWebhook(record.id, checked ? 'enable' : 'disable').then();
+          }}
+        />
+      ),
     },
     {
       title: '通道',
@@ -245,17 +253,6 @@ const WebhooksTable = () => {
                 复制 Webhook 链接
               </Button>
             </Tooltip>
-            <Button
-              size={'small'}
-              onClick={() => {
-                manageWebhook(
-                  webhook.id,
-                  webhook.status === 1 ? 'disable' : 'enable',
-                ).then();
-              }}
-            >
-              {webhook.status === 1 ? '禁用' : '启用'}
-            </Button>
             <Link to={'/webhook/edit/' + webhook.id}>
               <Button type='primary' size={'small'}>
                 编辑
@@ -284,7 +281,7 @@ const WebhooksTable = () => {
 
   return (
     <>
-      <Form onFinish={searchWebhooks}>
+      <Form layout='vertical' onFinish={searchWebhooks}>
         <Form.Item>
           <Input
             prefix={<SearchOutlined />}

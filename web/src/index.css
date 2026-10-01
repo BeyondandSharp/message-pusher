@@ -1,8 +1,29 @@
+/* 主题相关的两个变量由 helpers/theme.js 的令牌一一对应；
+   data-theme 由 index.html 的内联脚本在首帧前写好，避免白闪。 */
+:root {
+  --page-bg: #f5f6f8;
+  --page-fg: rgba(0, 0, 0, 0.88);
+  --quote-border: #d9d9d9;
+  --header-border: #f0f0f0;
+  --code-border: #d9d9d9;
+}
+
+[data-theme='dark'] {
+  --page-bg: #0d0d0d;
+  --page-fg: rgba(255, 255, 255, 0.85);
+  --quote-border: #424242;
+  --header-border: #2e2e2e;
+  --code-border: #424242;
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  /* 给固定在顶部的 Header 预留高度：52px 内容 + 1px 下边框（见 components/Header.jsx） */
-  padding-top: 53px;
+  /* 给固定在顶部的 Header 预留高度：56px 内容 + 1px 下边框（见 helpers/theme.js 的 HEADER_HEIGHT） */
+  padding-top: 57px;
   overflow-y: scroll;
+  background: var(--page-bg);
+  color: var(--page-fg);
   font-family:
     Lato, 'Helvetica Neue', Arial, Helvetica, 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -36,10 +57,29 @@ code {
 .quote {
   margin-left: 0;
   padding: 0 1em;
-  border-left: 0.25em solid #ddd;
+  border-left: 0.25em solid var(--quote-border);
 }
 
 /* antd 的按钮之间没有默认间距，表格操作列里的按钮会挤在一起，这里补上 */
 .ant-table-cell .ant-btn + .ant-btn {
   margin-left: 8px;
+}
+
+/* 代码编辑器：右上角操作按钮默认隐藏，鼠标悬浮到代码框上才出现 */
+.code-block {
+  position: relative;
+}
+
+.code-actions {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.code-block:hover .code-actions {
+  opacity: 1;
 }

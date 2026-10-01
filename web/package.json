@@ -15,6 +15,7 @@
     "@uiw/react-codemirror": "^4.25.12",
     "antd": "^6.6.5",
     "axios": "^1.20.0",
+    "js-beautify": "^2.0.3",
     "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

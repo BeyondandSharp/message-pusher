@@ -58,6 +58,12 @@ export default defineConfig(({ mode }) => ({
               name: 'codemirror',
               test: /[\\/]node_modules[\\/](@codemirror|@lezer|@uiw|crelt|style-mod|w3c-keyname)[\\/]/,
             },
+            // js-beautify（约 110 kB）只在点「格式化」JavaScript 时动态 import，
+            // 单独成包才能保证它不被 vendor 打包进首屏。
+            {
+              name: 'jsbeautify',
+              test: /[\\/]node_modules[\\/](js-beautify|config-chain|editorconfig|nopt|proto-list|abbrev|ini|mkdirp|glob|minimatch|once|wrappy|inherits|path-is-absolute|balanced-match|brace-expansion|concat-map|fs.realpath)[\\/]/,
+            },
             { name: 'vendor', test: /[\\/]node_modules[\\/]/ },
           ],
         },
