@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
 import {
-  Alert,
   Button,
   Card,
   Col,
@@ -130,16 +129,23 @@ const LoginForm = () => {
             </Button>
           </Card>
         </Form>
-        <Alert
-          type='info'
-          title={
-            <>
-              忘记密码？
-              <Link to='/reset'>点击重置</Link>； 没有账户？
-              <Link to='/register'>点击注册</Link>
-            </>
-          }
-        />
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 16,
+            marginTop: 16,
+          }}
+        >
+          <span>
+            忘记密码？<Link to='/reset'>点击重置</Link>
+          </span>
+          <span>
+            没有账户？<Link to='/register'>点击注册</Link>
+          </span>
+        </div>
         {status.github_oauth || status.wechat_login ? (
           <>
             <Divider plain>Or</Divider>
