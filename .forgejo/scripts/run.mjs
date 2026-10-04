@@ -8,7 +8,6 @@
 //
 // Subcommands:
 //   locate-action      find the copied Action directory, emit forgejo_dir
-//   ensure-tools       install docker (and buildx when the image provides it)
 //   verify-action      assert every shipped program is present, print capabilities
 //   resolve            derive version/variants/images from the tag
 //   preflight          credentials, Dockerfiles, tag collisions, docker daemon
@@ -18,30 +17,10 @@
 //   summary            digest table
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readOptional } from './config.mjs';
-import { endpointsPath } from './resolve.mjs';
-import {
-  MANAGER_PROXY_VARS,
-  OPTIONAL_TOOLS,
-  REQUIRED_TOOLS,
-  canInstall,
-  commandPrefix,
-  detectPackageManager,
-  installCommand,
-  installTools,
-  missingTools,
-  packagesFor,
-  primaryPackagesFor,
-  probeDocker,
-  proxyEnv,
-  repositoriesFor,
-  resolveEndpoint,
-  writeAptSources,
-  writeYumRepos,
-} from './deps.mjs';
+import { probeDocker } from './endpoints.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -70,7 +49,7 @@ const PROGRAMS = {
 
 /** Everything the Action ships; verify-action insists on all of it. */
 export const REQUIRED_SCRIPTS = [
-  'deps.mjs',
+  'endpoints.mjs',
   'locate-action.mjs',
   'run.mjs',
   'config.mjs',
@@ -84,7 +63,6 @@ export const REQUIRED_SCRIPTS = [
 
 export const SUBCOMMANDS = [
   'locate-action',
-  'ensure-tools',
   'verify-action',
   'resolve',
   'preflight',
@@ -154,173 +132,10 @@ async function verifyAction(env) {
     );
   }
   if (!docker.buildx) {
-    process.stdout.write('提示：没有 buildx 也能用（降级为 docker build + docker push，单平台、无缓存导出）。\n');
+    process.stdout.write('提示：本 Action 只用 `docker buildx build`，缺 buildx 时 preflight 会失败；\n');
+    process.stdout.write('      把宿主机的 docker CLI 与 cli-plugins 挂进 job 容器，或改用自带它们的镜像。\n');
   }
   return 0;
-}
-
-/**
- * Install the container tools the build needs, with the image's own package
- * manager and through the configured proxy.
- *
- * `docker` is required; `buildx` is best effort. Set SKIP_TOOL_INSTALL=true to
- * opt out (air-gapped images that prepackage the tools). Failure is a warning,
- * not an error: preflight reports the real problem with a runner-side checklist.
- */
-async function ensureTools(env) {
-  const { spawnSync } = await import('node:child_process');
-
-  // The *_PROXY values may be real proxies or internal mirrors/registries;
-  // classify them once and publish the verdicts, because the build consumes them
-  // as build arguments (see resolve.mjs).
-  await resolveEndpoints(env);
-
-  const missing = missingTools(REQUIRED_TOOLS, spawnSync);
-  const missingOptional = missingTools(OPTIONAL_TOOLS, spawnSync);
-  const wanted = [...missing, ...missingOptional];
-  if (wanted.length === 0) {
-    process.stdout.write(`工具齐全（${[...REQUIRED_TOOLS, ...OPTIONAL_TOOLS].join(', ')}），无需安装\n`);
-    return 0;
-  }
-  process.stdout.write(`缺少工具：${wanted.join(', ')}\n`);
-
-  const manager = detectPackageManager(env, spawnSync);
-  if (!manager) {
-    process.stderr.write('没有可用的包管理器（apk/apt-get/yum），请改用自带 docker 的 runner\n');
-    return 0;
-  }
-  const packages = packagesFor(manager, wanted);
-  const primaryPackages = primaryPackagesFor(manager, wanted);
-
-  // A `*_PROXY` value may be a mirror rather than a proxy: resolveEndpoint probes
-  // it once (does it serve its own repository index?) and the answer decides
-  // whether apt gets a generated sources file or a proxy setting.
-  const plan = await resolveEndpoint(manager, env);
-  if (plan.source === 'proxy-as-mirror') {
-    process.stdout.write(`${managerEndpointVar(manager)} 指向的是镜像（探测到仓库索引），按仓库使用\n`);
-  }
-  const repositories = plan.mirror;
-  const proxy = proxyEnv(manager, env, { explicit: plan.proxy });
-  const aptSourcesFile = manager === 'apt-get' ? writeAptSources(repositories, env) : '';
-  const yumReposDir = isYumFamily(manager)
-    ? writeYumRepos(repositories, env, { warn: (message) => process.stderr.write(`${message}\n`) })
-    : '';
-  const resolved = { repositories, aptSourcesFile, yumReposDir };
-
-  const proxyNote =
-    Object.keys(proxy).length > 0 ? `（代理：${plan.proxy || Object.keys(proxy).join(', ')}）` : '（未配置代理）';
-  const repoNote = repositories.length > 0 ? `（附加仓库：${repositories.join(', ')}）` : '';
-  process.stdout.write(`使用 ${manager} 安装：${primaryPackages.join(', ')} ${proxyNote}${repoNote}\n`);
-
-  if (!canInstall(env)) {
-    process.stderr.write(`不是 root 且没有 sudo，跳过安装；请手动执行：${installHint(manager, primaryPackages, env, resolved)}\n`);
-    return 0;
-  }
-
-  const result = installTools({ manager, tools: wanted, env, proxy, ...resolved });
-  const stillRequired = missingTools(REQUIRED_TOOLS, spawnSync);
-  const stillOptional = missingTools(OPTIONAL_TOOLS, spawnSync);
-  if (stillRequired.length === 0) {
-    process.stdout.write(`docker 可用${stillOptional.length === 0 ? '，buildx 可用' : '，buildx 仍缺失（将走降级路径）'}\n`);
-    return 0;
-  }
-  process.stderr.write(`docker 仍不可用（尝试过：${result.attempts.join(' | ') || '无'}）\n`);
-  process.stderr.write(`请手动执行：${installHint(manager, primaryPackages, env, resolved)}\n`);
-  return 0;
-}
-
-/** The `*_PROXY` variable that names this manager's endpoint, for log lines. */
-export function managerEndpointVar(manager) {
-  return (MANAGER_PROXY_VARS[manager] || [])[0] || `${String(manager).toUpperCase()}_PROXY`;
-}
-
-function isYumFamily(manager) {
-  return manager === 'yum' || manager === 'dnf' || manager === 'microdnf';
-}
-
-/** Make a resolved value visible to the following workflow steps. */
-function exportEnv(key, value) {
-  process.env[key] = value;
-  const file = process.env.GITHUB_ENV;
-  if (!file) return;
-  try {
-    appendFileSync(file, `${key}=${value}\n`);
-  } catch {
-    /* the value still applies to this process */
-  }
-}
-
-/** The raw (unexpanded) value of a variable, without a trailing slash. */
-function rawValue(env, name) {
-  return readOptional(env[name]).replace(/\/+$/, '');
-}
-
-/**
- * The apk mirror root, with the same precedence build-image.sh uses:
- * APK_REPO → APK_REPOSITORY → APK_PROXY (compat) → the apt mirror root.
- */
-export function apkMirrorRoot(env, aptMirror = '') {
-  const candidates = [repositoriesFor('apk', env)[0], rawValue(env, 'APK_PROXY'), aptMirror];
-  return candidates.map((value) => String(value || '').replace(/\/+$/, '')).find((value) => value !== '') || '';
-}
-
-/**
- * Classify the endpoint variables once and publish the verdicts for the build.
- *
- * A registry mirror becomes `--build-arg NPM_REGISTRY`; an apt *mirror* becomes
- * `--build-arg APT_PROXY` (the root the Dockerfiles rewrite their sources with),
- * and the apk mirror becomes `--build-arg APK_PROXY`. A genuine forward proxy is
- * never injected as a repository: it reaches the build through BuildKit's
- * HTTP(S)_PROXY forwarding instead.
- *
- * This Action never runs npm or apt itself inside the job (package installs
- * happen in `docker build`), so the verdicts are written to a file the following
- * steps read.
- */
-async function resolveEndpoints(env) {
-  const endpoints = {};
-
-  const npm = await resolveEndpoint('npm', env);
-  if (npm.source === 'proxy-as-mirror') {
-    endpoints.npmRegistry = npm.mirror[0];
-    process.stdout.write(`NPM_PROXY 指向的是 registry：构建将使用 --build-arg NPM_REGISTRY=${npm.mirror[0]}\n`);
-  } else if (npm.source === 'proxy') {
-    exportEnv('NPM_CONFIG_PROXY', npm.proxy);
-    process.stdout.write(`NPM_PROXY 指向的是代理：npm 将使用 ${npm.proxy}\n`);
-  }
-
-  const apt = await resolveEndpoint('apt-get', env);
-  const aptRoot = rawValue(env, 'APT_PROXY');
-  if ((apt.source === 'proxy-as-mirror' || apt.source === 'repository') && aptRoot) {
-    endpoints.aptMirror = aptRoot;
-    process.stdout.write(`APT_PROXY 指向的是镜像（探测到仓库索引）：构建将使用 --build-arg APT_PROXY=${aptRoot}\n`);
-  } else if (apt.source === 'proxy') {
-    process.stdout.write(`APT_PROXY 指向的是代理：构建容器通过 HTTP(S)_PROXY 走它（不注入 APT_PROXY 构建参数）\n`);
-  }
-
-  const apk = apkMirrorRoot(env, endpoints.aptMirror || '');
-  if (apk) {
-    endpoints.apkMirror = apk;
-    process.stdout.write(`apk 镜像：构建将使用 --build-arg APK_PROXY=${apk}\n`);
-  }
-
-  try {
-    writeFileSync(endpointsPath(env), JSON.stringify(endpoints, null, 2));
-  } catch (error) {
-    process.stderr.write(`[WARN] 无法写入 ${endpointsPath(env)}：${error.message}\n`);
-  }
-  return endpoints;
-}
-
-/** The command a human would run, for log messages. */
-export function installHint(manager, packages, env = process.env, resolved = {}) {
-  const built = installCommand(manager, packages, {
-    repositories: resolved.repositories ?? [],
-    aptSourcesFile: resolved.aptSourcesFile ?? '',
-    yumReposDir: resolved.yumReposDir ?? '',
-  });
-  if (!built) return `用 ${manager} 安装 ${packages.join(' ')}`;
-  return [...commandPrefix(env), built[0], ...built[1]].join(' ');
 }
 
 export async function dispatch(name, env = process.env) {
@@ -329,8 +144,6 @@ export async function dispatch(name, env = process.env) {
     return 2;
   }
   switch (name) {
-    case 'ensure-tools':
-      return ensureTools(env);
     case 'verify-action':
       return verifyAction(env);
     default:

@@ -12,7 +12,6 @@ import { appendFileSync, readFileSync, writeFileSync, realpathSync } from 'node:
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  DEFAULT_DEFAULT_VARIANT,
   buildOptionsFrom,
   imagesFrom,
   parseVariants,
@@ -20,35 +19,13 @@ import {
   registriesFrom,
   variantSelection,
 } from './config.mjs';
-import { goProxyFrom } from './deps.mjs';
+import { goProxyFrom, resolveEndpoint } from './endpoints.mjs';
 
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 
 /** Where the shared state for one run lives. */
 export function statePath(env = process.env) {
   return join(env.RUNNER_TEMP || '/tmp', 'docker-publish.json');
-}
-
-/**
- * Where ensure-tools records what it classified the endpoint variables as.
- *
- * A mirror is a *repository*, not a proxy: `APT_PROXY` pointed at an internal
- * Debian mirror must reach a Dockerfile as a mirror root (the Dockerfiles rewrite
- * their sources with it), while a genuine forward proxy must not. The verdict is
- * therefore passed between steps as a file rather than guessed twice.
- */
-export function endpointsPath(env = process.env) {
-  return join(env.RUNNER_TEMP || '/tmp', 'docker-publish.endpoints.json');
-}
-
-/** The endpoint verdicts ensure-tools published ({} when it did not run). */
-export function readEndpoints(env = process.env, readFile = readFileSync) {
-  try {
-    const parsed = JSON.parse(readFile(endpointsPath(env), 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
 }
 
 // Run directly (argv[1] is this file) rather than imported by a test.
@@ -69,31 +46,39 @@ export const IS_DIRECT = (() => {
  *
  *   * `VERSION`      — the tag (what people write by hand with the official trio:
  *                      `build-args: VERSION=${{ steps.meta.outputs.version }}`);
- *   * `GOPROXY`      — `GOPROXY` / `GO_PROXY`, so a Dockerfile's `ARG GOPROXY`
+ *   * `GOPROXY`      — `GOPROXY`, so a Dockerfile's `ARG GOPROXY`
  *                      reaches an internal Athens without extra configuration;
- *   * `NPM_REGISTRY` — an explicit `NPM_REGISTRY`, or the registry `ensure-tools`
+ *   * `NPM_REGISTRY` — the registry `classifyEndpoints()`
  *                      classified out of `NPM_PROXY`;
  *   * `APT_PROXY` / `APK_PROXY` — the mirror roots the Dockerfiles rewrite their
  *                      package sources with (the same two build args
- *                      build-image.sh passes). They are only filled in when
- *                      `APT_PROXY` was *classified as a mirror*: a forward proxy
- *                      is not a repository, and handing it to a Dockerfile that
- *                      does `s|^https?://|<root>/|` would produce a broken
- *                      sources list. A real proxy reaches the build through
- *                      BuildKit's HTTP(S)_PROXY forwarding instead.
+ *                      build-image.sh passes). `APT_PROXY` is only filled in when
+ *                      it was *classified as a mirror*: a forward proxy is not a
+ *                      repository, and handing it to a Dockerfile that does
+ *                      `s|^https?://|<root>/|` would produce a broken sources
+ *                      list. A real proxy reaches the build through BuildKit's
+ *                      HTTP(S)_PROXY forwarding instead;
+ *   * `APK_PROXY` also answers to the explicit `APK_REPO`, which is a repository
+ *     by definition (no probing) and wins over the apt mirror — this mirrors what
+ *     build-image.sh does with `APK_PROXY="${APK_PROXY:-${APK_REPO:-${APT_PROXY}}}"`;
+ *   * `YUM_REPO` — passed through as `--build-arg YUM_REPO=<value>` for a
+ *     Dockerfile that rewrites its dnf/yum repositories.
  *
  * An explicit `DOCKER_BUILD_ARGS` entry always wins, because that is the
  * repository saying what it wants. Nothing is injected when the source variable
  * is empty, so a repository that sets none of them sees exactly the same
  * command line as before.
  */
-export function withDefaultBuildArgs(options, { version, env = process.env, endpoints = readEndpoints(env) }) {
+export function withDefaultBuildArgs(options, { version, env = process.env, endpoints = {} }) {
   const candidates = [
     ['VERSION', version],
     ['GOPROXY', goProxyFrom(env)],
-    ['NPM_REGISTRY', readOptional(env.NPM_REGISTRY) || readOptional(endpoints.npmRegistry)],
+    ['NPM_REGISTRY', readOptional(endpoints.npmRegistry)],
     ['APT_PROXY', readOptional(endpoints.aptMirror)],
-    ['APK_PROXY', readOptional(endpoints.apkMirror)],
+    // An explicit APK_REPO is a repository by definition and wins; otherwise the
+    // Alpine Dockerfile reuses the apt mirror root (the usual cache serves both).
+    ['APK_PROXY', readOptional(env.APK_REPO) || readOptional(endpoints.aptMirror)],
+    ['YUM_REPO', readOptional(env.YUM_REPO)],
   ];
   const injected = candidates
     .filter(([key, value]) => value !== undefined && value !== null && String(value) !== '')
@@ -166,9 +151,9 @@ export function dispatchInput(env, name, eventInputs = {}, { warn = () => {} } =
 }
 
 /**
- * Free-form tags are allowed only when DOCKER_ALLOW_ANY_TAG=true: the semver
- * rules then produce nothing, but `type=ref`, `type=sha` and `type=raw` still
- * work. Default is strict, because a mistyped tag is how wrong versions ship.
+ * The release identity is the tag that triggered the run: a semver tag, with an
+ * optional `v`, and optionally a pre-release suffix. Anything else is refused —
+ * there is no escape hatch, because a mistyped tag is how wrong versions ship.
  */
 export function resolveRelease(env = process.env, { variantsOverride, warn = () => {} } = {}) {
   const eventInputs = readEventInputs(env);
@@ -194,12 +179,9 @@ export function resolveRelease(env = process.env, { variantsOverride, warn = () 
   if (!rawTag) throw new Error('无法确定版本：GITHUB_REF_NAME 为空');
   const versionSource = inputVersion ? 'input' : 'ref';
 
-  const allowAnyTag = ['1', 'true', 'yes', 'on'].includes(readOptional(env.DOCKER_ALLOW_ANY_TAG).toLowerCase());
   const version = stripTagPrefix(rawTag);
-  if (!SEMVER.test(version) && !allowAnyTag) {
-    throw new Error(
-      `无法从 tag 解析出合法版本号：${rawTag}（想让任意 tag 可用，请设置变量 DOCKER_ALLOW_ANY_TAG=true）`,
-    );
+  if (!SEMVER.test(version)) {
+    throw new Error(`无法从 tag 解析出合法版本号：${rawTag}（需要形如 v1.2.3 或 1.2.3-rc.1 的 tag）`);
   }
   const prerelease = version.includes('-');
 
@@ -210,10 +192,8 @@ export function resolveRelease(env = process.env, { variantsOverride, warn = () 
   const dryRun = ['1', 'true', 'yes', 'on'].includes(inputDryRun.toLowerCase());
 
   const variants = variantSelection(
-    parseVariants(
-      readOptional(env.DOCKER_VARIANTS) || variantsOverride || undefined,
-      readOptional(env.DOCKER_DEFAULT_VARIANT) || DEFAULT_DEFAULT_VARIANT,
-    ),
+    // The fifth column of the table is what decides who owns `latest`.
+    parseVariants(readOptional(env.DOCKER_VARIANTS) || variantsOverride || undefined),
     inputVariants,
   );
   const registries = registriesFrom(env);
@@ -224,8 +204,7 @@ export function resolveRelease(env = process.env, { variantsOverride, warn = () 
     tag: rawTag,
     versionSource,
     prerelease,
-    allowAnyTag,
-    semver: SEMVER.test(version),
+    semver: true,
     sha,
     shortSha: sha.slice(0, 7),
     repo,
@@ -246,14 +225,42 @@ export function resolveRelease(env = process.env, { variantsOverride, warn = () 
     variants,
     registries,
     images,
-    options: withDefaultBuildArgs(buildOptionsFrom(env, { dryRun }), { version, env }),
+    // The build args that need the network (APT_PROXY / NPM_PROXY classification)
+    // are filled in by main(), which can await the probes.
+    options: buildOptionsFrom(env, { dryRun }),
     builds: [],
     results: [],
   };
 }
 
+/**
+ * Classify the two endpoint variables that may be a mirror or a proxy.
+ *
+ * A mirror is a *repository*, not a proxy: `APT_PROXY` pointed at an internal
+ * Debian mirror must reach a Dockerfile as a mirror root (the Dockerfile rewrites
+ * its sources with it), while a genuine forward proxy reaches the build through
+ * BuildKit's HTTP(S)_PROXY forwarding and must not be passed as a repository.
+ * `NPM_PROXY` is classified the same way and injected as `--build-arg
+ * NPM_REGISTRY`.
+ */
+export async function classifyEndpoints(env = process.env, { resolve = resolveEndpoint } = {}) {
+  const endpoints = {};
+  const apt = await resolve('apt-get', env);
+  if (apt.source === 'proxy-as-mirror') endpoints.aptMirror = envValueOf(env, 'APT_PROXY');
+  const npm = await resolve('npm', env);
+  if (npm.source === 'proxy-as-mirror') endpoints.npmRegistry = npm.mirror[0];
+  return endpoints;
+}
+
+/** The raw configured value, without a trailing slash. */
+function envValueOf(env, name) {
+  return readOptional(env[name]).replace(/\/+$/, '');
+}
+
 async function main() {
   const state = resolveRelease(process.env);
+  const endpoints = await classifyEndpoints(process.env);
+  state.options = withDefaultBuildArgs(state.options, { version: state.version, env: process.env, endpoints });
   writeFileSync(statePath(process.env), JSON.stringify(state, null, 2));
 
   const emit = (key, value) => {
@@ -280,6 +287,8 @@ async function main() {
   process.stdout.write(
     `registry：${state.registries.map((entry) => `${entry.id}=${entry.enabled ? `启用(${entry.user})` : '未配置'}`).join(' ')}\n`,
   );
+  const injected = state.options.buildArgs.map((arg) => `${arg.key}=${arg.value}`).join(' ');
+  process.stdout.write(`构建参数：${injected}\n`);
 }
 
 if (IS_DIRECT) {

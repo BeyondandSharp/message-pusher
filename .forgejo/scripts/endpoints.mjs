@@ -1,0 +1,183 @@
+// endpoints.mjs — the endpoint variables, and what the runner can do.
+//
+// Two jobs, both small:
+//
+//   1. CLASSIFY `APT_PROXY` and `NPM_PROXY`. Their value may be a real forward
+//      proxy or an internal MIRROR/registry, and the difference matters because
+//      the value is handed to the Dockerfile as a build argument
+//      (`APT_PROXY`, `APK_PROXY`, `NPM_REGISTRY`): a mirror root is what a
+//      Dockerfile rewrites its sources with, while a forward proxy reaches the
+//      build through BuildKit's own HTTP(S)_PROXY forwarding and must NOT be
+//      passed as a repository. A repository answers its index path (`2xx`); a
+//      proxy answers a plain HTTP error; no answer at all keeps the operator
+//      value as a mirror.
+//
+//   2. PROBE the runner: is there a `docker` CLI, can it reach a daemon, and is
+//      `buildx` available. All three are required — this Action drives
+//      `docker buildx build` and has no classic-builder fallback.
+//
+// Nothing here installs anything: the job container must already provide the
+// CLI and the plugin (mount them from the host, or use an image that has them).
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+
+/** Proxy variables the job honours, in the order they should win. */
+export const PROXY_VARS = ['ALL_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'APT_PROXY'];
+
+/**
+ * The `*_PROXY` variable that names a manager's endpoint. Only apt and npm have
+ * one: apk/yum have no repository variable here because the Action never
+ * installs packages, and the apk build argument is derived from the apt mirror.
+ */
+export const MANAGER_PROXY_VARS = {
+  'apt-get': ['APT_PROXY'],
+  npm: ['NPM_PROXY'],
+};
+
+/** The Go module proxy, passed into the build as `--build-arg GOPROXY`. */
+export function goProxyFrom(env = process.env) {
+  return envValue(env, ['GOPROXY']);
+}
+
+/** The first non-empty of `names`, trimmed, without a trailing slash. */
+export function envValue(env, names) {
+  for (const name of names) {
+    const value = env[name] ?? env[name.toLowerCase()];
+    if (value && String(value).trim()) return String(value).trim().replace(/\/+$/, '');
+  }
+  return '';
+}
+
+/** `/etc/os-release` as an object ("" for a missing key), tolerant of quotes. */
+export function parseOsRelease(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const match = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!match) continue;
+    out[match[1]] = match[2].replace(/^["']|["']$/g, '');
+  }
+  return out;
+}
+
+export function readOsRelease(path = '/etc/os-release') {
+  try {
+    return parseOsRelease(readFileSync(path, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Turn a configured endpoint into the concrete URL the probe (and the
+ * Dockerfile) should use. A URL that already names the repository path is passed
+ * through; a bare mirror root gets the distro's own path from `/etc/os-release`
+ * (`/debian` or `/ubuntu` for apt), and npm's registry is the value itself.
+ */
+export function expandEndpoint(manager, base, osRelease = {}) {
+  const url = String(base || '').replace(/\/+$/, '');
+  if (!url) return [];
+  if (manager === 'apt-get') {
+    const hasPath = /\/(?:debian|ubuntu|debian-security)$/.test(url);
+    const path = hasPath ? '' : String(osRelease.ID || '') === 'ubuntu' ? '/ubuntu' : '/debian';
+    return [`${url}${path}`];
+  }
+  return [url]; // npm: the registry is the value itself
+}
+
+/** The one file that proves a URL is a repository index for this manager. */
+export function endpointProbeUrl(manager, endpoint, osRelease = {}) {
+  if (manager === 'apt-get') {
+    const suite = String(osRelease.VERSION_CODENAME || osRelease.VERSION_ID || '');
+    return suite ? `${endpoint}/dists/${suite}/InRelease` : '';
+  }
+  if (manager === 'npm') return `${endpoint}/-/ping`;
+  return '';
+}
+
+/**
+ * Is this value a repository rather than a proxy?
+ *
+ * A repository answers its own index path; a proxy answers the same path with a
+ * plain HTTP error (it expects absolute URIs or CONNECT). A network error means
+ * "could not tell", and the value is kept as a mirror: that is what the operator
+ * configured, and an unreachable endpoint fails either way.
+ */
+export async function probeEndpoint(base, manager, { fetchImpl = globalThis.fetch, osRelease = {}, timeoutMs = 8000 } = {}) {
+  const endpoints = expandEndpoint(manager, base, osRelease);
+  if (endpoints.length === 0) return false;
+  const url = endpointProbeUrl(manager, endpoints[0], osRelease);
+  if (!url) return true; // nothing to check against
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
+    return Boolean(response && response.ok);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Decide how one manager should use its configured endpoint.
+ *
+ * Returns `{ mirror, proxy, source }` where `source` is `'proxy-as-mirror'`
+ * (inject it as a repository), `'proxy'` (leave it to BuildKit), or `''`
+ * (nothing configured).
+ */
+export async function resolveEndpoint(manager, env = process.env, { fetchImpl, osRelease, timeoutMs } = {}) {
+  const release = osRelease || readOsRelease();
+  const candidate = envValue(env, MANAGER_PROXY_VARS[manager] || []);
+  if (!candidate) return { mirror: [], proxy: '', source: '' };
+  const isMirror = await probeEndpoint(candidate, manager, { fetchImpl, osRelease: release, timeoutMs });
+  if (isMirror) return { mirror: expandEndpoint(manager, candidate, release), proxy: '', source: 'proxy-as-mirror' };
+  return { mirror: [], proxy: candidate, source: 'proxy' };
+}
+
+/** `buildx` is a docker subcommand, not a binary on PATH. */
+export function hasBinary(binary, run = spawnSync) {
+  if (binary === 'buildx') {
+    return run('docker', ['buildx', 'version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).status === 0;
+  }
+  return run('sh', ['-c', `command -v ${binary}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).status === 0;
+}
+
+/**
+ * What the runner can do. All three of `cli`, `daemon` and `buildx` are
+ * required: without buildx there is no build path at all, and a container job
+ * only reaches a daemon when the runner mounted the socket (or runs the job on
+ * the host), which is the single most common setup mistake.
+ *
+ * `socketPath` / `socketPresent` sharpen the error: "the socket was never
+ * mounted" and "the socket is there but the daemon refuses" need different fixes.
+ */
+export function probeDocker(env = process.env, run = spawnSync, { exists = existsSync } = {}) {
+  if (!hasBinary('docker', run)) {
+    return { cli: false, daemon: false, buildx: false, server: '', host: '', socketPath: '', socketPresent: null, error: 'docker 命令不存在' };
+  }
+  const version = run('docker', ['version', '--format', '{{.Server.Version}}'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const server = version.status === 0 ? String(version.stdout || '').trim() : '';
+
+  const host = String(env.DOCKER_HOST || '').trim();
+  const socketPath = host.startsWith('unix://') ? host.slice('unix://'.length) : host === '' ? '/var/run/docker.sock' : '';
+  let socketPresent = null;
+  if (socketPath) {
+    try {
+      socketPresent = exists(socketPath);
+    } catch {
+      socketPresent = null;
+    }
+  }
+
+  return {
+    cli: true,
+    daemon: version.status === 0,
+    buildx: hasBinary('buildx', run),
+    server,
+    host,
+    socketPath,
+    socketPresent,
+    error: version.status === 0 ? '' : String(version.stderr || 'docker version 失败').trim(),
+  };
+}

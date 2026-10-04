@@ -64,7 +64,7 @@ export function login({ entry, token, env = process.env, run = spawnSync }) {
 }
 
 const HINTS = {
-  ghcr: 'ghcr.io 需要 GitHub PAT（classic 勾选 write:packages，或 fine-grained 勾选 Packages: write）；用户名用 GHCR_USER / GHCR_OWNER',
+  ghcr: 'ghcr.io 需要 GitHub PAT（classic 勾选 write:packages，或 fine-grained 勾选 Packages: write）；镜像名用 GHCR_IMAGE（用户名即命名空间）',
   dockerhub: 'Docker Hub 需要 access token（不是账号密码）；用户名填 DOCKERHUB_USERNAME',
 };
 

@@ -139,8 +139,15 @@ sudo service nginx restart
 
 | 变体 | Dockerfile | 构建链 | 运行时 | 二进制 | 默认标签 |
 |---|---|---|---|---|---|
-| `trixie`（默认） | `Dockerfile.trixie` | 全 Debian（`node:24-trixie-slim` / `golang:1.27-trixie`） | `debian:trixie-slim`（glibc） | 动态链接 glibc | `message-pusher:<版本>`，对应 `latest` |
+| `trixie-slim`（默认） | `Dockerfile.trixie-slim` | 全 Debian（`node:24-trixie-slim` / `golang:1.27-trixie`） | `debian:trixie-slim`（glibc） | 动态链接 glibc | `message-pusher:<版本>`（对应 `latest`）＋ CI 另推 `<镜像>:<版本>-trixie-slim` |
 | `alpine` | `Dockerfile.alpine` | 全 Alpine（`node:24-alpine` / `golang:1.27-alpine`） | `alpine:3.24`（musl） | musl 静态链接 | `message-pusher:<版本>-alpine` |
+
+宿主机只装了 docker、没有 buildx 时，可以让构建在仓库自带的构建环境镜像里跑（镜像由根目录 `Dockerfile.builder` 构建）：
+
+```shell
+docker build -f Dockerfile.builder -t message-pusher-builder:1 .
+./build-image.sh --in-builder --builder-image message-pusher-builder:1
+```
 
 两个变体的链接方式不同是有意的：alpine 侧用 musl 编译成自包含的静态二进制；trixie 侧面向 glibc 运行时，
 用动态链接（glibc 的静态链接反而要依赖运行时 `dlopen` 解析 DNS，容易出问题）。

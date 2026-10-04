@@ -4,7 +4,7 @@
 # 并导出成可直接 docker load 的镜像文件。
 #
 # 支持两个变体（与 CI 的发布变体一一对应）：
-#   trixie  运行时 Debian trixie（glibc）—— 默认变体，对应 latest 与无后缀标签
+#   trixie-slim  运行时 Debian trixie（glibc）—— 默认变体，对应 latest、无后缀标签与 -trixie-slim 后缀标签
 #   alpine  运行时 Alpine（musl）      —— 标签带 -alpine 后缀
 # 两个变体各自独立编译，互不共享产物。
 #
@@ -12,7 +12,7 @@
 # 宿主机只需要有 docker，不需要本机安装 pnpm / node / go。
 #
 # 用法：
-#   ./build-image.sh                          # trixie 变体，镜像叫 message-pusher:<git 版本>
+#   ./build-image.sh                          # trixie-slim 变体，镜像叫 message-pusher:<git 版本>
 #   ./build-image.sh --variant alpine         # alpine 变体
 #   ./build-image.sh message-pusher:test      # 指定镜像名
 #   ./build-image.sh -o out                   # 指定镜像文件输出目录（默认 dist）
@@ -24,25 +24,38 @@
 #   NPM_PROXY / NPM_REGISTRY  前端 npm registry（不设置则用官方源）
 # 例如：NPM_PROXY=https://registry.npmmirror.com ./build-image.sh
 
+# 可选：在构建环境镜像里构建（宿主机只需要有 docker）：
+#   docker build -f Dockerfile.builder -t message-pusher-builder:1 .   # 先构建构建镜像
+#   ./build-image.sh --in-builder --builder-image message-pusher-builder:1
+# 构建镜像的引用不在本脚本里写死：用 --builder-image 或环境变量 BUILDER_IMAGE 传入。
+
 set -euo pipefail
 
 IMAGE=""
 OUTPUT_DIR="dist"
 DO_SAVE=1
-VARIANT="trixie"
+VARIANT="trixie-slim"
+BUILDER_IMAGE="${BUILDER_IMAGE-}"
+IN_BUILDER=0
+# 原始参数：--in-builder 重入时要原样传进容器（去掉 --in-builder 自己）
+ORIG_ARGS=("$@")
 
 usage() {
   cat <<'EOF'
 用法：./build-image.sh [选项] [镜像名[:标签]]
 
 选项：
-      --variant NAME     构建哪个变体：trixie（默认，运行时 Debian）或 alpine（运行时 Alpine）
+      --variant NAME     构建哪个变体：trixie-slim（默认，运行时 Debian）或 alpine（运行时 Alpine）
+                          （trixie 作为旧名仍然接受）
   -o, --output-dir DIR   镜像文件输出目录，默认 dist
       --no-save          只构建镜像，不导出镜像文件
+      --in-builder       把构建放进构建环境镜像里跑（宿主机只需要有 docker）
+      --builder-image REF
+                         构建环境镜像地址（也可用环境变量 BUILDER_IMAGE）
   -h, --help             显示本帮助
 
 示例：
-  ./build-image.sh                                # trixie（默认）
+  ./build-image.sh                                # trixie-slim（默认）
   ./build-image.sh --variant alpine               # alpine
   ./build-image.sh --variant alpine message-pusher:v1
   ./build-image.sh --no-save
@@ -68,6 +81,15 @@ while [[ $# -gt 0 ]]; do
       DO_SAVE=0
       shift
       ;;
+    --in-builder)
+      IN_BUILDER=1
+      shift
+      ;;
+    --builder-image)
+      [[ $# -ge 2 ]] || { echo "错误：--builder-image 缺少参数。" >&2; exit 1; }
+      BUILDER_IMAGE="${2}"
+      shift 2
+      ;;
     -h|--help)
       usage 0
       ;;
@@ -87,10 +109,38 @@ cd "${ROOT_DIR}"
 
 command -v docker >/dev/null 2>&1 || { echo "错误：未找到 docker 命令。" >&2; exit 1; }
 
-# 变体 -> Dockerfile 与默认标签后缀（与 CI 的发布策略保持一致：trixie 是默认变体，拥有 latest）
+# --in-builder：把这次构建放进构建环境镜像里跑（镜像由根目录 Dockerfile.builder 构建）。
+# 只挂 docker socket 与仓库目录，代理等环境变量按需转发；用 BUILD_IMAGE_IN_CONTAINER 防重入。
+if [[ ${IN_BUILDER} -eq 1 ]]; then
+  if [[ -n "${BUILD_IMAGE_IN_CONTAINER:-}" ]]; then
+    echo "错误：已经在构建镜像内运行，不能再嵌套 --in-builder。" >&2
+    exit 1
+  fi
+  if [[ -z "${BUILDER_IMAGE}" ]]; then
+    echo "错误：--in-builder 需要构建镜像地址（--builder-image <ref> 或环境变量 BUILDER_IMAGE）。" >&2
+    echo "      先在仓库根目录构建它：docker build -f Dockerfile.builder -t <ref> ." >&2
+    exit 1
+  fi
+  REEXEC_ARGS=()
+  for arg in "${ORIG_ARGS[@]}"; do
+    [[ "${arg}" == "--in-builder" ]] || REEXEC_ARGS+=("${arg}")
+  done
+  echo "==> 在构建镜像内构建：${BUILDER_IMAGE}"
+  exec docker run --rm \
+    -e BUILD_IMAGE_IN_CONTAINER=1 \
+    -e APK_PROXY -e APT_PROXY -e APK_REPO -e GOPROXY -e NPM_REGISTRY -e NPM_PROXY -e YUM_REPO \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "${ROOT_DIR}:${ROOT_DIR}" \
+    -w "${ROOT_DIR}" \
+    "${BUILDER_IMAGE}" \
+    ./build-image.sh "${REEXEC_ARGS[@]}"
+fi
+
+# 变体 -> Dockerfile 与标签后缀（与 CI 的发布策略一致：trixie-slim 是默认变体，拥有 latest
+# 以及无后缀标签；CI 另外会推一套 -trixie-slim 后缀标签，本地只出一个镜像名）
 case "${VARIANT}" in
-  trixie)
-    DOCKERFILE="Dockerfile.trixie"
+  trixie-slim|trixie)
+    DOCKERFILE="Dockerfile.trixie-slim"
     TAG_SUFFIX=""
     ;;
   alpine)
@@ -98,7 +148,7 @@ case "${VARIANT}" in
     TAG_SUFFIX="-alpine"
     ;;
   *)
-    echo "错误：未知变体 ${VARIANT}（可选：trixie / alpine）。" >&2
+    echo "错误：未知变体 ${VARIANT}（可选：trixie-slim / alpine）。" >&2
     exit 1
     ;;
 esac
@@ -146,7 +196,14 @@ fi
 [[ -n "${GOPROXY}" ]] && echo "==> Go 模块代理：${GOPROXY}"
 
 echo "==> 构建镜像（前端 pnpm 依赖 + go-sqlite3 都在容器内编译，首次会比较慢）"
-docker build -f "${DOCKERFILE}" -t "${IMAGE}" "${BUILD_ARGS[@]}" .
+# 与 CI 一致：优先 buildx（--load 把结果放回本地镜像库，后面 docker save 要用）；
+# 宿主机没有 buildx 时回落到 docker build。
+if docker buildx version >/dev/null 2>&1; then
+  docker buildx build --load -f "${DOCKERFILE}" -t "${IMAGE}" "${BUILD_ARGS[@]}" .
+else
+  echo "    （未检测到 buildx，回落到 docker build）"
+  docker build -f "${DOCKERFILE}" -t "${IMAGE}" "${BUILD_ARGS[@]}" .
+fi
 
 if [[ ${DO_SAVE} -eq 0 ]]; then
   echo

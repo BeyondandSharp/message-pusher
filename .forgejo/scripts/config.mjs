@@ -8,18 +8,15 @@
 //   * a registry is enabled by the presence of its token — nothing else;
 //   * image bases are derived from the repository unless DOCKER_META_IMAGES
 //     says otherwise, and are always lowercased (ghcr.io requires it);
-//   * variants are data, not code: DOCKER_VARIANTS describes how each variant
-//     is built, and every variant is built by its own `docker build` call.
+//   * variants are data, not code: the variant table describes how each variant
+//     is built, and every variant is built by its own `docker buildx build`.
 //
 // Tokens never leave this module inside a returned structure: entries carry the
 // *name* of the variable holding the token, so a caller cannot accidentally
 // serialise a credential into the state file.
 
 /** The built-in variant table: the Alpine and Debian (trixie) builds. */
-export const DEFAULT_VARIANTS = ['alpine|Dockerfile.alpine', 'trixie|Dockerfile.trixie'].join('\n');
-
-/** trixie owns `latest` and the unsuffixed tags; alpine is suffixed only. */
-export const DEFAULT_DEFAULT_VARIANT = 'trixie';
+export const DEFAULT_VARIANTS = ['alpine|Dockerfile.alpine', 'trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true'].join('\n');
 
 /** Registries this Action knows how to log in to and push to. */
 export const REGISTRIES = {
@@ -29,10 +26,6 @@ export const REGISTRIES = {
 
 export function readOptional(value) {
   return String(value ?? '').trim();
-}
-
-export function isTrue(value) {
-  return ['1', 'true', 'yes', 'on'].includes(readOptional(value).toLowerCase());
 }
 
 /** Newline / comma / semicolon separated list, `#` comments dropped. */
@@ -78,7 +71,7 @@ const VARIANT_NAME = /^[a-z0-9][a-z0-9._-]*$/;
  * `FROM ${NODE_IMAGE}`, and the value travels with the variant:
  *
  *   alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
- *   trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
+ *   trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
  */
 export function parseVariantBuildArgs(raw) {
   return String(raw ?? '')
@@ -100,10 +93,14 @@ export function parseVariantBuildArgs(raw) {
  * Only the name is required; the rest defaults to `Dockerfile.<name>`, no
  * target, `-<name>` suffix, "not the default variant" and no extra build args.
  * The literal suffix `none` means "no suffix at all" (useful when
- * DOCKER_META_TAGS already distinguishes variants). DOCKER_DEFAULT_VARIANT wins
- * over the fifth field.
+ * DOCKER_META_TAGS already distinguishes variants).
+ *
+ * The fifth column is the only thing that decides which variant owns `latest`
+ * and the unsuffixed tags: exactly one row must say `true`, and a table with a
+ * single variant is trivially its own default. Anything else is an error — a
+ * silent fallback would move `latest` to a variant nobody chose.
  */
-export function parseVariants(raw = DEFAULT_VARIANTS, defaultVariant = DEFAULT_DEFAULT_VARIANT) {
+export function parseVariants(raw = DEFAULT_VARIANTS) {
   // One variant per line: the sixth column may itself contain `;` (build-arg
   // separator) and `,` (inside values like `GOPROXY=http://a,direct`), so this
   // list must not be split on those.
@@ -127,11 +124,18 @@ export function parseVariants(raw = DEFAULT_VARIANTS, defaultVariant = DEFAULT_D
       buildArgs: parseVariantBuildArgs(argsRaw),
     });
   }
-  const wanted = readOptional(defaultVariant) || DEFAULT_DEFAULT_VARIANT;
-  for (const variant of variants) variant.isDefault = variant.name === wanted;
-  if (!variants.some((variant) => variant.isDefault)) {
-    throw new Error(`DOCKER_DEFAULT_VARIANT=${wanted} 不在 DOCKER_VARIANTS 里（可选：${variants.map((v) => v.name).join(', ')}）`);
+
+  const flagged = variants.filter((variant) => variant.isDefault);
+  const names = variants.map((variant) => variant.name).join(', ');
+  if (flagged.length > 1) {
+    throw new Error(`DOCKER_VARIANTS 里有多个变体被标记为默认（第五列为 true）：${flagged.map((v) => v.name).join(', ')}`);
   }
+  if (flagged.length === 0 && variants.length > 1) {
+    throw new Error(
+      `无法确定默认变体（拥有 latest 与无后缀标签的那个）：请在 DOCKER_VARIANTS 第五列给一个变体写 true（可选：${names}）`,
+    );
+  }
+  if (flagged.length === 0) variants[0].isDefault = true; // a lone variant is its own default
   return variants;
 }
 
@@ -182,9 +186,9 @@ export function imageRegistryOf(base) {
 }
 
 /**
- * The GHCR namespace: an explicit GHCR_IMAGE is the most specific statement
- * about the image, so it wins over GHCR_OWNER, which in turn wins over the
- * Forgejo owner (the two are frequently different accounts).
+ * The GHCR namespace, from `GHCR_IMAGE` when it is set and from the repository
+ * owner otherwise. A GitHub account that differs from the Forgejo owner is
+ * expressed by naming the whole image in `DOCKER_META_IMAGES`.
  */
 export function ghcrNamespaceFrom(env = process.env) {
   const repoOwner = readOptional(env.GITHUB_REPOSITORY).split('/')[0] || '';
@@ -193,25 +197,25 @@ export function ghcrNamespaceFrom(env = process.env) {
     const parts = image.split('/');
     return parts[0] === 'ghcr.io' ? parts[1] || '' : parts[0] || '';
   }
-  return readOptional(env.GHCR_OWNER) || repoOwner;
+  return repoOwner;
 }
 
 /**
  * Which registries are configured, and as whom. `enabled` is driven purely by
  * the presence of the credentials, so a repository that only wants ghcr.io
- * simply does not set the Docker Hub variables.
+ * simply does not set the Docker Hub variables. The login user of a GHCR push
+ * is its namespace: that is the account the PAT belongs to.
  */
 export function registriesFrom(env = process.env) {
   const ghcrNamespace = ghcrNamespaceFrom(env);
-  const ghcrUser = readOptional(env.GHCR_USER) || ghcrNamespace;
   const dockerhubUser = readOptional(env.DOCKERHUB_USERNAME);
 
   return [
     {
       ...REGISTRIES.ghcr,
-      user: ghcrUser,
+      user: ghcrNamespace,
       namespace: ghcrNamespace,
-      enabled: readOptional(env[REGISTRIES.ghcr.tokenVar]) !== '',
+      enabled: readOptional(env[REGISTRIES.ghcr.tokenVar]) !== '' && ghcrNamespace !== '',
     },
     {
       ...REGISTRIES.dockerhub,
@@ -223,10 +227,12 @@ export function registriesFrom(env = process.env) {
 }
 
 /**
- * The image bases to publish to, one per enabled registry (unless
- * DOCKER_META_IMAGES overrides them). Explicit entries for a disabled registry
- * are an error — publishing is impossible without credentials, and silently
- * skipping an image the repository asked for is worse than failing.
+ * The image bases to publish to, one per enabled registry, unless
+ * DOCKER_META_IMAGES overrides them (which is also how a Docker Hub organisation
+ * namespace or a GHCR account that differs from the repository owner is
+ * expressed). Explicit entries for a disabled registry are an error —
+ * publishing is impossible without credentials, and silently skipping an image
+ * the repository asked for is worse than failing.
  *
  * `preview` (dry runs) derives a ghcr.io base even with no credentials at all,
  * so a repository can validate its variants, tags and Dockerfiles before any
@@ -248,8 +254,8 @@ export function imagesFrom(env = process.env, registries = registriesFrom(env), 
   }
 
   const images = [];
-  const name = readOptional(env.DOCKER_IMAGE_NAME) || readOptional(repoName);
-  if (!name) throw new Error('无法推导镜像名：GITHUB_REPOSITORY 为空，请设置 DOCKER_IMAGE_NAME 或 DOCKER_META_IMAGES');
+  const name = readOptional(repoName);
+  if (!name) throw new Error('无法推导镜像名：GITHUB_REPOSITORY 为空，请设置 DOCKER_META_IMAGES');
   for (const entry of registries) {
     if (!entry.enabled) continue;
     if (entry.id === 'ghcr') {
@@ -259,27 +265,24 @@ export function imagesFrom(env = process.env, registries = registriesFrom(env), 
     }
   }
   if (images.length === 0 && preview) {
-    const owner = readOptional(env.GHCR_OWNER) || readOptional(env.GITHUB_REPOSITORY).split('/')[0];
+    const owner = readOptional(env.GITHUB_REPOSITORY).split('/')[0];
     if (owner) images.push({ base: normalizeImageBase(`ghcr.io/${owner}/${name}`), registryId: 'ghcr', preview: true });
   }
   return images;
 }
 
-/** Build behaviour, from the variables, for this run. */
+/**
+ * Build behaviour for this run. The context is always the repository root, and
+ * attestations are always off: the only knobs left are the platforms, the build
+ * args, and whether this run pushes.
+ */
 export function buildOptionsFrom(env = process.env, { dryRun = false } = {}) {
-  const pushFlag = readOptional(env.DOCKER_PUSH);
   return {
-    context: readOptional(env.DOCKER_CONTEXT) || '.',
+    context: '.',
     platforms: splitList(env.DOCKER_PLATFORMS),
     buildArgs: parseKeyValues(env.DOCKER_BUILD_ARGS, 'DOCKER_BUILD_ARGS'),
-    cacheFrom: splitList(env.DOCKER_CACHE_FROM),
-    cacheTo: splitList(env.DOCKER_CACHE_TO),
-    pull: isTrue(env.DOCKER_PULL),
-    noCache: isTrue(env.DOCKER_NO_CACHE),
-    provenance: isTrue(env.DOCKER_PROVENANCE),
     dryRun: Boolean(dryRun),
-    // `true` on a tag push, `false` for a dry run; DOCKER_PUSH=false forces a
-    // build-only run even on a tag.
-    push: !dryRun && (pushFlag === '' ? true : isTrue(pushFlag)),
+    // A tag push publishes; a dry run only validates the build.
+    push: !dryRun,
   };
 }

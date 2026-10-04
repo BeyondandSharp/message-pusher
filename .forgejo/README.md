@@ -35,7 +35,7 @@ cp -r docker-build-push /path/to/target-repo/.forgejo
 │   └── docker-publish.yml    # 只有编排；唯一的 shell 是定位入口那 3 行
 └── scripts/                  # 全部逻辑，普通 .mjs 文件
     ├── run.mjs               # 分发器：每个步骤一行调用它
-    ├── deps.mjs              # 缺工具时用 apk/apt/yum 安装 + 代理映射 + docker 探测
+    ├── endpoints.mjs         # 端点判别（镜像 vs 代理）+ docker/buildx 能力探测
     ├── locate-action.mjs     # 找 Action 目录（github.action_path 为空的情况）
     ├── config.mjs            # 仓库变量 → 归一化配置（registry/镜像名/变体/构建选项）
     ├── resolve.mjs           # tag → 版本、变体、状态文件
@@ -57,7 +57,7 @@ workflow 里每一步都长这样（`配置里没有内嵌脚本`）：
 
 唯一的例外是定位步骤本身 —— 它必须先找到 `run.mjs` 才能调用它，所以有 3 行引导。
 
-可用子命令：`locate-action`、`ensure-tools`、`verify-action`、`resolve`、`preflight`、`login`、`meta`、`build-push`、`summary`；都能在本地直接跑，例如
+可用子命令：`locate-action`、`verify-action`、`resolve`、`preflight`、`login`、`meta`、`build-push`、`summary`；都能在本地直接跑，例如
 `GITHUB_WORKSPACE=$PWD GITHUB_REPOSITORY=a/b RUNNER_TEMP=/tmp node scripts/run.mjs locate-action`。
 
 复制不全会被 `verify-action` 拦下并逐个列出缺哪个文件。
@@ -65,7 +65,7 @@ workflow 里每一步都长这样（`配置里没有内嵌脚本`）：
 ## 目标仓库需要准备什么
 
 1. `设置 → Actions`：勾选 **Enable Repository Actions**。
-2. **两个变体的 Dockerfile**：默认约定 `Dockerfile.alpine` 与 `Dockerfile.trixie`（可用 `DOCKER_VARIANTS` 改）。
+2. **两个变体的 Dockerfile**：默认约定 `Dockerfile.alpine` 与 `Dockerfile.trixie-slim`（可用 `DOCKER_VARIANTS` 改）。
 3. 至少一套 registry 凭据（见下表）。
 4. 一个能访问 Docker 守护进程的 runner（见「runner 前置条件」）。
 
@@ -108,7 +108,7 @@ ENTRYPOINT ["/message-pusher"]
 ```
 
 ```dockerfile
-# Dockerfile.trixie（默认变体，承载 latest）
+# Dockerfile.trixie-slim（默认变体，承载 latest）
 FROM node:24-trixie AS frontend
 ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /build/web
@@ -155,7 +155,7 @@ ENTRYPOINT ["/message-pusher"]
 | 手工 `workflow_dispatch` | 在**分支**上运行时必须填 `version`（它就是本次发布的版本）；在 **tag ref** 上运行时 `version` 必须与之一致；`variants` 只构建指定变体；`dry_run` 只验证构建（不登录、不推送） |
 
 预发布版本（含 `-`）**不会**产出 `latest`，但 `alpine` / `trixie` 浮动标签仍会更新。
-非 semver 的 tag 默认被拒绝；确实需要时设 `DOCKER_ALLOW_ANY_TAG=true`（此时 `semver` 规则不产出，`ref`/`sha`/`raw` 照常）。
+非 semver 的 tag 一律被拒绝（没有开关）：版本号必须形如 `v1.2.3` 或 `1.2.3-rc.1`。
 
 ### runner 不展开 `${{ inputs.* }}` 时
 
@@ -179,7 +179,7 @@ ENTRYPOINT ["/message-pusher"]
 | --- | --- | --- |
 | `GHCR_TOKEN` | 二选一 | 带 `write:packages` 的 GitHub PAT（classic）或 fine-grained token（Packages: write）。**存在即启用 ghcr.io** |
 | `DOCKERHUB_TOKEN` | 二选一 | Docker Hub access token（不是账号密码）。**存在即启用 Docker Hub** |
-| `GHCR_OWNER` / `GHCR_IMAGE` / `GHCR_USER` | 否 | GHCR 命名空间通常与 Forgejo 的 owner **不同名**：`GHCR_IMAGE=ghcr.io/<账号>/<仓库>` 最直接；`GHCR_OWNER` 只给命名空间；`GHCR_USER` 用于 fine-grained org token |
+| `GHCR_IMAGE` | 否 | GHCR 命名空间通常与 Forgejo 的 owner **不同名**：`GHCR_IMAGE=ghcr.io/<账号>/<仓库>`。登录用户就是命名空间；不设时按仓库 owner 推导 |
 | `DOCKERHUB_USERNAME` | Docker Hub 必需 | 同时作为登录用户与命名空间 |
 
 > token 只以环境变量进入脚本：`docker login --password-stdin`，**不进命令行**；`preflight` 拒绝在没有任何凭据时发布（dry run 除外）。
@@ -192,47 +192,39 @@ ENTRYPOINT ["/message-pusher"]
 
 | 名称 | 默认 | 说明 |
 | --- | --- | --- |
-| `DOCKER_IMAGE_NAME` | 仓库名 | 镜像仓库名，两个 registry 共用 |
-| `DOCKER_META_IMAGES` | 空（按 registry 推导） | 覆盖镜像基名，换行/逗号分隔，例如 `ghcr.io/acme/app` |
-| `DOCKER_VARIANTS` | 见下 | 变体表：`名字\|Dockerfile\|target\|后缀\|是否默认` |
-| `DOCKER_DEFAULT_VARIANT` | `trixie` | 独占 `latest` 与无后缀标签的变体 |
-| `DOCKER_CONTEXT` | `.` | 构建上下文 |
+| `DOCKER_META_IMAGES` | 空（按 registry 推导） | **唯一**的镜像名入口：覆盖基名（换行/逗号分隔），例如 `ghcr.io/acme/app`、`myorg/app` |
+| `DOCKER_VARIANTS` | 内置表 | 变体表：`名字\|Dockerfile\|target\|后缀\|是否默认\|该变体的 build args`。内置 workflow 由 matrix 的 `spec` 注入，也可改用这个变量，语法相同 |
 | `DOCKER_META_TAGS` | `type=ref,event=tag` / `type=semver,pattern={{version}}` / `type=semver,pattern={{major}}.{{minor}}` / `type=sha` | 每行一条规则；见下 |
 | `DOCKER_META_FLAVOR` | `latest=auto` | `latest=auto\|true\|false`、`prefix=`、`suffix=`（可带 `,onlatest=true`） |
 | `DOCKER_META_LABELS` | 空 | 覆盖/追加 OCI label，每行 `KEY=VALUE` |
 | `DOCKER_BUILD_ARGS` | 空 | 每行 `KEY=VALUE`（值里可以有逗号）。`VERSION` 已自动注入，这里写了就覆盖它 |
 | `DOCKER_PLATFORMS` | 空（= runner 平台） | 例如 `linux/amd64,linux/arm64`；>1 平台时自动建 `docker-container` builder |
-| `DOCKER_CACHE_FROM` / `DOCKER_CACHE_TO` | 空 | 原样透传（`type=gha` 不可用） |
-| `DOCKER_PULL` / `DOCKER_NO_CACHE` | 空 | `true` → `--pull` / `--no-cache` |
-| `DOCKER_PROVENANCE` | 空 | 默认**不加** attestation（`--provenance=false`）；`true` 才加 |
-| `DOCKER_PUSH` | tag 触发为 `true` | `false` 只构建不推送 |
-| `DOCKER_ALLOW_ANY_TAG` | 空 | `true` 允许非 semver tag |
-| `SKIP_TOOL_INSTALL` | 空 | `true` 关闭自动安装 docker/buildx |
-| 代理 / 镜像变量 | 空 | 见下面「代理、镜像与 registry」 |
+| `DOCKER_HOST` | 空 | daemon 地址（`tcp://…` 或非默认 unix socket）；不设即 `/var/run/docker.sock` |
+| `APT_PROXY` / `NPM_PROXY` / `GOPROXY` | 空 | 内网端点（会探测一次），见下面「代理、镜像与 registry」 |
+| `APK_REPO` / `YUM_REPO` | 空 | **显式仓库地址**（不探测）：`APK_REPO` 是 `APK_PROXY` 构建参数的来源，`YUM_REPO` 原样作为 `--build-arg YUM_REPO` 传给 Dockerfile |
 
 ### 代理、镜像与 registry（内网怎么接）
 
-runner 没有直连外网时，先分清三件不同的事：**代理**（forward proxy）、**镜像/仓库**（repository）、**registry**。填错变量的典型症状是 `unable to select packages`、`HTTP 404/308`、`Connection refused`。变量名与用法和 [npm-publish](../npm-publish/README.md) **完全一致**，同一套内网配置两个 Action 都能直接用。
+runner 没有直连外网时，先分清三件不同的事：**代理**（forward proxy）、**镜像/仓库**（repository）、**registry**。填错变量的典型症状是 `unable to select packages`、`HTTP 404/308`、`Connection refused`。本 Action **不安装任何东西**（见「runner 前置条件」），所以端点只有两类用途：apt 镜像给 Dockerfile 里的 `apt-get` 用，npm registry 给前端 `pnpm install` 用——两者都以构建参数的形式传进构建。
 
 **最省事的用法：只填下面这几个地址。**
-`APT_PROXY` / `NPM_PROXY` 的值可以是**真代理**，也可以是**内网镜像/registry**：`Ensure container tools` 会**探测一次**（取该地址自己的仓库索引 / `/-/ping`），再决定怎么用。
+`APT_PROXY` / `NPM_PROXY` 的值可以是**真代理**，也可以是**内网镜像/registry**：`Resolve version and variants` 步骤会**探测一次**（取该地址自己的仓库索引 / `/-/ping`），再决定怎么用。判定结果会打进日志（`构建参数：…`）。
 
 | 变量 | 你填什么 | 判为**镜像 / registry** | 判为**代理** |
 | --- | --- | --- | --- |
-| `APT_PROXY` | Debian/Ubuntu 镜像根，如 `https://apt.internal` | 生成临时 sources（`<根>/debian` 或 `/ubuntu` + 镜像里的 codename）→ `apt-get -o Dir::Etc::sourcelist=…` 装 docker CLI | 作为 apt 的 `http_proxy`/`https_proxy` |
-| `NPM_PROXY` | 内网 npm registry，如 `https://npm.internal` | 构建时注入 `--build-arg NPM_REGISTRY=<url>`（Dockerfile 里写 `ARG NPM_REGISTRY` 即可给 `pnpm install --registry` 用） | 作为 npm 自己的 `proxy` 设置 |
-| `GOPROXY`（或 `GO_PROXY`） | Go module proxy（Athens 等） | 构建时注入 `--build-arg GOPROXY=<url>`（Dockerfile 里写 `ARG GOPROXY`） | — |
+| `APT_PROXY` | Debian/Ubuntu 镜像根，如 `https://apt.internal` | 注入 `--build-arg APT_PROXY=<根>/debian`（Dockerfile 里 `ARG APT_PROXY` 后改写 sources）；`APK_PROXY` 同时复用这个根 | 不注入任何东西：真代理由 BuildKit 转发 `HTTP(S)_PROXY` 即可 |
+| `NPM_PROXY` | 内网 npm registry，如 `https://npm.internal` | 构建时注入 `--build-arg NPM_REGISTRY=<url>`（Dockerfile 里写 `ARG NPM_REGISTRY` 即可给 `pnpm install --registry` 用） | 不注入：BuildKit 转发 `HTTP(S)_PROXY` |
+| `GOPROXY` | Go module proxy（Athens 等） | 构建时注入 `--build-arg GOPROXY=<url>`（Dockerfile 里写 `ARG GOPROXY`） | — |
+
+**apk / yum 的仓库用这两个（显式指定，不探测）**：
+
+| 变量 | 你填什么 | 结果 |
+| --- | --- | --- |
+| `APK_REPO` | apk 镜像根或完整仓库地址，如 `https://apk.internal` | 注入 `--build-arg APK_PROXY=<值>`；**优先于**上面判出来的 apt 镜像根（同一个缓存服务通常两者都代理），Dockerfile 里仍写 `ARG APK_PROXY` 即可 |
+| `YUM_REPO` | yum/dnf 镜像根或完整 baseurl | 注入 `--build-arg YUM_REPO=<值>`（Dockerfile 里写 `ARG YUM_REPO` 后改写自己的 repo 文件） |
 
 判别规则：直接 GET 索引文件，**2xx = 镜像**；拿到明确的 HTTP 错误（404/400/308…）= 代理；**完全没有响应**（连不上/超时）= 仍按镜像处理 —— 那正是你填的地址，报错信息也更贴切。
 本 Action 自己**不跑 npm**（前端构建发生在 `docker build` 里），所以 `NPM_PROXY` 的判别结果是通过 build arg 传给构建的，而不是本地安装用。
-
-apk / yum 的镜像用这两个（显式指定，**不探测**；设了就优先于任何 `*_PROXY`）：
-
-| 变量 | 指向什么 |
-| --- | --- |
-| `APK_REPO` | Alpine 镜像**根地址或完整仓库 URL**（逗号分隔）：根地址会按镜像里的 `VERSION_ID` 展开成 `<根>/alpine/vX.Y/{main,community}` |
-| `YUM_REPO` | yum/dnf 镜像**根地址或完整 baseurl**（逗号分隔；根地址按 `VERSION_ID` 展开成 `<根>/centos/<N>-stream/{BaseOS,AppStream}/x86_64/os`）；生成 `.repo` 目录 + `--setopt=reposdir=`，镜像自带的 `/etc/pki/rpm-gpg/RPM-GPG-KEY*` 会写进 `gpgkey`（`gpgcheck=1`），一个密钥都没有时才降级为 `gpgcheck=0` 并在日志里说明。旧的 `APK_REPOSITORY` / `YUM_REPOSITORY` 仍可识别 |
-| `APK_PROXY` / `YUM_PROXY` | **已删除**：apk/yum 的镜像是仓库而不是代理，填到 `APK_REPO` / `YUM_REPO`；真要给它们配代理就用下面的通用变量 |
 
 **真正的 HTTP 转发代理**（它们只当代理，不做判别；BuildKit 会自动把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 转发进构建容器）：
 
@@ -262,10 +254,11 @@ socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网
 | build arg | 来源 | 覆盖方式 |
 | --- | --- | --- |
 | `VERSION` | 本次 tag 的版本（去掉 `v` 前缀） | `DOCKER_BUILD_ARGS: VERSION=...` |
-| `GOPROXY` | 变量 `GOPROXY` 或 `GO_PROXY` | 同上 |
-| `NPM_REGISTRY` | 变量 `NPM_REGISTRY`（显式），或 `NPM_PROXY` 被判为 registry 的结果 | 同上 |
+| `GOPROXY` | 变量 `GOPROXY` | 同上 |
+| `NPM_REGISTRY` | `NPM_PROXY` 被判为 registry 的结果 | 同上 |
 | `APT_PROXY` | 变量 `APT_PROXY`，**仅当它被判为镜像**（此时值是镜像根地址，Dockerfile 用它改写 sources） | 同上 |
-| `APK_PROXY` | 变量 `APK_REPO` / `APK_REPOSITORY`（兼容旧名 `APK_PROXY`），没有则退回上面的 apt 镜像根 | 同上 |
+| `APK_PROXY` | 变量 `APK_REPO`（显式仓库，优先），否则复用上面判出的 apt 镜像根 | `DOCKER_BUILD_ARGS: APK_PROXY=...` |
+| `YUM_REPO` | 变量 `YUM_REPO` | `DOCKER_BUILD_ARGS: YUM_REPO=...` |
 | 变体自己的参数 | `DOCKER_VARIANTS` 第六列，例如 `NODE_IMAGE=node:lts-alpine` | `DOCKER_BUILD_ARGS` 里写同名项 |
 
 这些值和 `build-image.sh` 传的是同一组，所以本地构建与 CI 行为一致：Dockerfile 里 `ARG APT_PROXY` / `ARG APK_PROXY` / `ARG NPM_REGISTRY` / `ARG GOPROXY` / `ARG VERSION` 声明了哪个，就消费哪个；每个值为空时都不会注入，Dockerfile 没声明对应的 `ARG` 时会被忽略。
@@ -285,15 +278,29 @@ socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网
 ```
 DOCKER_VARIANTS: |
   alpine|Dockerfile.alpine
-  trixie|Dockerfile.trixie
+  trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true
 ```
+
+> 内置的 workflow 把每个 job 自己的那一行通过 `matrix.spec` 传进来（见「一变体一 job 容器」），所以**默认不需要在仓库里配这个变量**；想集中管理时再改用 `DOCKER_VARIANTS` 变量，语法完全一样。
+
+**第五列（是否默认）是唯一决定 `latest` 归属的地方**：整个表里必须**恰好一个** `true`；一个都没有（且有多个变体）会直接报错，只有一个变体时它天然是默认。所以改变体名只需把 `true` 写到新名字那一行，不需要别的变量。
+
+**变体名是三处共用的键**，必须一致：
+
+| 位置 | 例子 |
+| --- | --- |
+| workflow matrix 的 `variant`（= `INPUT_VARIANTS`） | `trixie-slim` |
+| `DOCKER_VARIANTS` 第一个字段 | `trixie-slim|Dockerfile.trixie-slim|…` |
+| 该行第二个字段指向的 Dockerfile | `Dockerfile.trixie-slim` |
+
+matrix 里的 `image:` 只是 job 容器，可以随便换（`node:lts-trixie-slim`、内网镜像都行），**和变体名无关**。
 
 **第六列是每个变体自己的 build args**，这就是"让仓库指定工具链镜像"的通用做法——Dockerfile 里声明 `ARG`，值随变体走，不需要改 workflow、也不需要为每个变体单独写 job：
 
 ```yaml
 DOCKER_VARIANTS: |
   alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine;GO_IMAGE=golang:1.27-alpine
-  trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
+  trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
 ```
 
 对应 Dockerfile（`ARG` 必须在**第一个 `FROM` 之前**声明才能用于 `FROM`）：
@@ -325,15 +332,81 @@ FROM ${NODE_IMAGE} AS frontend
 
 ## runner 前置条件（重要）
 
+这个 Action **不安装任何东西**：它只调用 `docker buildx build`。所以 runner 必须同时满足三件事，缺哪件 `preflight` 都会失败并列出清单：
+
+| 需要 | 说明 |
+| --- | --- |
+| `docker` CLI | 在 **job 容器内**可执行。runner 进程有 docker ≠ job 容器有 docker：后者来自镜像或挂载。内置 workflow 用根目录 `Dockerfile.builder` 构建的镜像提供 |
+| `buildx` 插件 | 没有经典构建回退，缺它直接失败。同样由 `Dockerfile.builder` 构建的镜像提供 |
+| 可达的 Docker 守护进程 | 容器任务要挂 `/var/run/docker.sock`；或 daemon 在别处时用 `DOCKER_HOST` |
+
+### 构建与发布构建镜像
+
+CI 与本地共用的构建环境镜像在根目录 `Dockerfile.builder`（基座 `docker:cli`，装上 buildx / node / git / bash）：
+
+```bash
+docker build -f Dockerfile.builder -t ghcr.io/<账号>/message-pusher-builder:1 .
+docker run --rm ghcr.io/<账号>/message-pusher-builder:1 docker buildx version   # 自检
+```
+
+发布二选一：
+
+- **手动**：`docker login ghcr.io -u <账号>` 后 `docker push` 上面那个 tag；
+- **workflow**：手动触发 `docker-publish`（`workflow_dispatch`）里的 **builder-image** 作业 —— 它跑在宿主机 runner 上（**不写 `container:`**），用 runner 自己的 docker 构建并推送，配了 Docker Hub 凭据时会一并推。
+
+**顺序很重要**：发布作业的 job 容器用的就是这个镜像，所以**先发布构建镜像，再打 tag 触发发布**，否则 job 拉不到容器镜像直接失败。
+
+**换命名空间时改三处**：`docker-publish.yml` 矩阵里两行的 `image:`，以及 `builder-image` 作业里的 `IMAGE`（文件内均有注释标出）。标签建议用固定 `:1`：`container.image` 由 runner 在任何步骤之前解析，固定标签能避免「改了构建镜像、CI 静默跟着变」。
+
+### 三种接法（按推荐顺序）
+
+**1. 用仓库自带的构建镜像（内置 workflow 的默认，只挂 socket）**
+
+job 容器直接用上面那个镜像，仓库自带的 workflow 已经这么写：
+
+```yaml
+    container:
+      image: ${{ matrix.image }}      # 矩阵里写死的构建镜像
+      options: >-
+        --volume /var/run/docker.sock:/var/run/docker.sock
+```
+
+runner 只需放行这一个路径，然后**重启 runner**：
+
+```yaml
+runner:
+  container:
+    valid_volumes: ["/var/run/docker.sock"]
+```
+
+**2. 挂载宿主机的 socket + CLI + 插件（不发布构建镜像时的做法）**
+
+```yaml
+    container:
+      image: ${{ matrix.image }}
+      options: >-
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        --volume /usr/bin/docker:/usr/bin/docker:ro
+        --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
+```
+
+三条路径必须在 runner 配置里放行，然后**重启 runner**：
+
+```yaml
+runner:
+  container:
+    valid_volumes: ["/var/run/docker.sock", "/usr/bin/docker", "/usr/libexec/docker/cli-plugins"]
+```
+
+插件目录在部分发行版是 `/usr/lib/docker/cli-plugins`，按实际情况改。
+
+**3. 宿主机 runner**
+
+workflow 里不写 `container:`，脚本直接用宿主机的 docker —— 只要 runner 用户能访问 `/var/run/docker.sock`。
+
 ### 为什么 job 里还需要 `docker` 命令
 
-“runner 本来就能起 docker”是对的，但**能起 docker 的是 runner 进程，不是 job 容器**：
-
-- Forgejo runner 用 `docker run` 起 job 容器，它自己通过宿主机 socket 调 docker —— 这个 `docker` 二进制在**宿主机（或 runner 容器）里**；
-- 我们的脚本运行在 **job 容器内部**，那里既没有 `docker` 命令，默认也没有 `/var/run/docker.sock`；
-- GitHub 官方 runner 的镜像自带 docker CLI 与 daemon，所以官方三个 Action 不用管；Forgejo 的 `container:` 任务不是这样。
-
-因此本 Action 需要两样东西：**job 容器里能执行 `docker`**，以及**它连得上一个 daemon**。
+“runner 本来就能起 docker”是对的，但**能起 docker 的是 runner 进程，不是 job 容器**：runner 用 `docker run` 把 job 容器跑起来，那个 `docker` 二进制待在宿主机（或 runner 容器）里；我们的脚本运行在 job 容器内部，那里默认既没有 CLI 也没有 socket。GitHub 官方 runner 的镜像自带 docker CLI + daemon，所以官方那三个 Action 不需要管这件事。
 
 ### 别把三层 image 混淆（`Start image=` 不是你的产物）
 
@@ -341,9 +414,9 @@ FROM ${NODE_IMAGE} AS frontend
 
 | 层面 | 日志里长什么样 | 由谁决定 |
 | --- | --- | --- |
-| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=node:lts-alpine`（或 `node:lts`，取决于 matrix 条目） | workflow 的 `container.image`（当前是 `${{ matrix.image }}`）。换它只影响脚本在哪跑，**不影响产物** |
-| ② 构建阶段：Dockerfile 里的 `FROM … AS frontend/backend` | `docker buildx build --file Dockerfile.trixie …` 过程中拉取 `node:24-trixie-slim`、`golang:1.27-trixie` 等 | 你的 Dockerfile |
-| ③ 最终产物：推送出去的镜像 | 同一条命令的 `--tag …:1.0.0-trixie` 列表 | 变体表 + Dockerfile **最后一个** `FROM` |
+| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=ghcr.io/…/message-pusher-builder:1`（由矩阵条目 `image:` 决定） | workflow 的 `container.image`（当前是 `${{ matrix.image }}`，两行指向同一个构建镜像）。换它只影响脚本在哪跑，**不影响产物** |
+| ② 构建阶段：Dockerfile 里的 `FROM … AS frontend/backend` | `docker buildx build --file Dockerfile.trixie-slim …` 过程中拉取 `node:24-trixie-slim`、`golang:1.27-trixie` 等 | 你的 Dockerfile |
+| ③ 最终产物：推送出去的镜像 | 同一条命令的 `--tag …:1.0.0-trixie-slim` 列表 | 变体表 + Dockerfile **最后一个** `FROM` |
 
 所以看到 `Start image=node:lts-…` 不代表「打包用错了 Dockerfile」：它只是 job 容器。产物里是 Debian 还是 Alpine，只取决于该变体用的是哪个 Dockerfile。
 
@@ -354,39 +427,9 @@ docker run --rm --entrypoint sh <镜像:tag> -c 'head -2 /etc/os-release'
 docker image inspect <镜像:tag> --format '{{.Config.Labels}}'
 ```
 
-### 三种接法（按推荐顺序）
-
-**1. 把宿主机的 CLI 与 socket 一起挂进 job 容器（推荐，零安装、版本一致）**
-
-```yaml
-    runs-on: docker
-    container:
-      image: node:22-bookworm
-      options: >-
-        --volume /var/run/docker.sock:/var/run/docker.sock
-        --volume /usr/bin/docker:/usr/bin/docker:ro
-        --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
-```
-
-这三个路径都要在 runner 配置的 `valid_volumes` 里放行。第三行是 buildx 插件目录（有些发行版是 `/usr/lib/docker/cli-plugins`），不需要多平台/缓存导出时可以省略。
-
-**2. 用自带 docker CLI 的 job 镜像**
-
-例如 `docker:cli`（Alpine，带 CLI 与 buildx），再让 `ensure-tools` 补 node；或自己构建一个 node + docker CLI 的镜像。这需要把 workflow 里的 `container.image` 改成你的镜像（本 Action 刻意没有提供镜像变量）。
-
-**3. 让 Action 自己装（默认行为，最省事但依赖镜像源）**
-
-`ensure-tools` 会用镜像自带的包管理器尝试安装，走上面的代理/镜像变量：
-
-- Debian/Ubuntu：`docker.io`（Debian 主源里就有，但**同时会装上没用到的 dockerd**，体积偏大）；
-- Alpine：`docker-cli`；
-- yum/dnf：`docker` / `docker-ce-cli`。
-
-**buildx 在纯 Debian 源里不存在**（`docker-buildx` / `docker-buildx-plugin` 只在 Docker CE 仓库里），所以这条路通常只能拿到 CLI → 自动降级为单平台构建。想要 buildx 就用接法 1 或 2，或者给镜像加上 Docker CE 的 apt 源。
-
 ### 一变体一 job 容器（matrix，已内置）
 
-workflow 默认就是 matrix：**每个变体一个 job、一个自己的 job 容器**。alpine 变体在 Alpine 的 node 里跑，Debian 变体在 Debian 的 node 里跑——这样 `ensure-tools` 会走对应的包管理器，两个变体也真正并行。
+workflow 默认就是 matrix：**每个变体一个 job、一个自己的 job 容器**，并且**每个 matrix 条目自带该变体的变体表行**（`spec`，语法与 `DOCKER_VARIANTS` 完全相同）。所以变体的标签后缀、Dockerfile、工具链镜像全都来自 matrix，不需要再配别的变量：
 
 ```yaml
 jobs:
@@ -399,47 +442,50 @@ jobs:
         include:
           - variant: alpine
             image: node:lts-alpine
-          - variant: trixie
-            image: node:lts
+            spec: alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
+          - variant: trixie-slim
+            image: node:lts-trixie-slim
+            spec: trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
     container:
       image: ${{ matrix.image }}
     env:
+      DOCKER_VARIANTS: ${{ matrix.spec }}          # 本 job 的变体表
+      INPUT_VARIANTS: ${{ matrix.variant }}        # 只构建这一个变体
       # …其余 env 不变…
-      INPUT_VARIANTS: ${{ matrix.variant }}   # 每个 job 只构建自己的变体
 ```
 
-**再加一个 job 容器 = 加三行**：
+**再加一个 job 容器 = 一个条目 + 一个 Dockerfile**：
 
 ```yaml
-          - variant: bookworm      # ① matrix 里加一条
+          - variant: bookworm
             image: node:lts
+            spec: bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
 ```
 
-② 在仓库变量 `DOCKER_VARIANTS` 里加同名变体（决定 Dockerfile、后缀、是否默认、以及它的 build args）：
+（`variant` 只用于 job 名和过滤；`spec` 第一段的名字才是关键。想让某个变体拥有 `latest` 与无后缀标签，就把它的第五段写成 `true`——**整个 matrix 里只能有一个 `true`**。写 `false` 的行是"明确不要 latest"，不会被单变体回退悄悄变成默认，因此两个 job 绝不会同时推 `latest`。）
+
+每个 job 只需自己那个 Dockerfile 存在；两个 job 各自有独立的 `RUNNER_TEMP`，状态文件不冲突。
+
+想改用仓库变量集中管理变体（不在 workflow 里写 `spec`），把那一行换成：
 
 ```yaml
-DOCKER_VARIANTS: |
-  alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
-  trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
-  bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
+      DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
 ```
 
-③ 加对应的 `Dockerfile.bookworm`。三处名字一致即可，脚本不需要改。
-
-标签归属不受影响：只有**默认变体**产无后缀标签与 `latest`，其余变体只产 `<后缀>` 系列；两个 job 各自有独立的 `RUNNER_TEMP`，状态文件不冲突。每个 job 也只需要自己那个 Dockerfile 存在（alpine job 不会因为缺少 `Dockerfile.trixie` 而失败）。
+两者语法一致，任选其一；`spec` 的好处是变体定义跟着 job 走、review 时一眼能看出这个 job 构建什么。
 
 注意事项：
 
-- **`container.image` 里的 `${{ matrix.image }}` 必须能被求值**。你的 runner 之前出现过 `inputs.*` 不求值的情况，所以第一次改完请先跑一次 `dry_run` 确认日志里没有把表达式原样当成镜像名（那会报拉取失败）。
-- **挂载宿主机的 docker CLI 比在每个容器里各装一次划算**（Alpine 要 `apk`、Debian 要 `apt`，而且 Debian 源里通常没有 buildx）：把上面 `container.options` 的三行挂载打开即可。
-- 想少写 YAML 也可以让 matrix 来自变量：`matrix: ${{ fromJSON(vars.DOCKER_MATRIX) }}`——但 `fromJSON` 依赖 runner 的表达式实现，先用 `dry_run` 验证；不确定时用上面的显式写法。
+- **`${{ matrix.image }}` / `${{ matrix.spec }}` 必须能被求值**。你的 runner 之前出现过 `inputs.*` 不求值的情况，所以第一次改完先跑一次 `dry_run`，确认日志里 `🚀 Start image=` 后面不是字面量表达式。
+- **挂载宿主机的 docker CLI 比在每个容器里各装一次划算**（Alpine 要 `apk`、Debian 要 `apt`，而且 Debian 源里通常没有 buildx）：把 `container.options` 的三行挂载打开即可。
+- 也可以让 matrix 来自变量：`matrix: ${{ fromJSON(vars.DOCKER_MATRIX) }}`——`fromJSON` 依赖 runner 的表达式实现，先用 `dry_run` 验证。
 
 ### 其他要点
 
 - **socket 必须可达**：容器任务要挂 `/var/run/docker.sock`（如上）并在 runner 的 `valid_volumes` 里放行；宿主机 runner 则要求 runner 用户能访问该 socket。连不上时 `preflight` 会带上这份检查清单直接失败。
-- **`buildx` 缺失不是错误**：自动降级为 `docker build` + `docker tag` + `docker push`（单平台、无缓存导出、无 provenance），日志里有醒目提示；`DOCKER_PLATFORMS` 指定多平台时才会失败。降级时会带上 `DOCKER_BUILDKIT=1`，因此示例 Dockerfile 里的 `RUN --mount=type=cache` 仍然有效。
-- **`buildx < 0.11`** 不支持 `--provenance`，此时自动不传该参数。
-- **一个包缺失不会拖垮必需的包**：镜像里没有 `docker-buildx` 而只有 `docker.io` 时，批量安装会整体失败，Action 会把每个候选包单独重试，因此 `docker.io` 仍能装上（`docker` 必需、`buildx` 可选）。
+- **buildx 必需**：没有 `docker buildx` 就没有构建路径，`preflight` 直接失败（错误里带上面的挂载/`valid_volumes` 清单）。
+- **`--provenance=false` 始终传**：不产出 attestation manifest（有些 registry/客户端不认），也没有开关。
+- **不安装任何工具**：Action 不再调用 apk/apt/yum，也不再生成 sources/repos 文件。
 
 ## 本地校验（不需要 docker daemon / registry）
 
@@ -458,34 +504,52 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 "
 ```
 
-`test/docker-layout-e2e.test.mjs` 就是这么做的：PATH 上放一个假 `docker`（记录 argv、伪造 `buildx build` 与 `login`），按真实步骤顺序跑 `locate → ensure-tools → verify → resolve → preflight → login → meta → build-push → summary`，并断言「每个变体一次构建」「token 不进 argv/日志/状态文件」。
+`test/docker-layout-e2e.test.mjs` 就是这么做的：PATH 上放一个假 `docker`（记录 argv、伪造 `buildx build` 与 `login`），按真实步骤顺序跑 `locate → verify → resolve → preflight → login → meta → build-push → summary`，并断言「每个变体一次构建」「token 不进 argv/日志/状态文件」「没有 buildx 时 preflight 失败」。
 
 ## 行为细节
 
 - **只发布、不改仓库**：不 commit、不 push、不打 tag，也不修改工作区里的版本号。
 - **幂等性**：重复推同一个 tag 会重新构建并覆盖同名 tag（Docker 本身就是这个语义），不会报错。
-- **digest**：`buildx` 路径用 `--metadata-file` 读 `containerimage.digest`；降级路径用 `docker inspect` 的 `RepoDigests`。汇总写在日志与 `$GITHUB_STEP_SUMMARY`（Forgejo 没有该变量时只打日志）。
+- **digest**：用 `--metadata-file` 读 `containerimage.digest`。汇总写在日志与 `$GITHUB_STEP_SUMMARY`（Forgejo 没有该变量时只打日志）。
 - **label**：`created/revision/version/source/url/title` 由脚本生成，`DOCKER_META_LABELS` 可覆盖。
-- **dry run**：`--output type=cacheonly`，不登录、不推送、不写 image store；没有任何凭据也能跑（会用 `ghcr.io/<owner>/<仓库>` 作为预览镜像名）。
+- **dry run**：`--output type=cacheonly`，不登录、不推送、不写 image store；没有任何凭据也能跑（会用 `ghcr.io/<owner>/<仓库>` 作为预览镜像名）。仍然需要 docker CLI + buildx。
 - **多 registry**：一次构建同时打上两个 registry 的标签，一次 push 推到两边；两个 registry 各登录一次。
 
 ## 已知限制
 
 - 只支持 **ghcr.io 与 Docker Hub**；其它 registry、`registry-auth` 多 registry YAML、`scope`、OIDC、ECR 相关能力未实现（超出范围）。
+- **必须有 docker CLI + buildx + 可达 daemon**（见「runner 前置条件」）；没有经典构建回退，也**不安装**任何工具。
 - 不支持 Docker Bake（HCL）、annotations 输出、`--secret`/`--ssh`、named contexts、`add-hosts`/`ulimit`/`shm-size`/`network`。
-- 不实现 `type=gha` 缓存（GitHub Actions Cache 服务在 Forgejo 不存在）；用 `type=registry` 或 `type=local`。
+- **没有缓存导入导出**（`type=gha` 在 Forgejo 不存在，`--cache-from/--cache-to` 也未开放）；重复构建靠 BuildKit 自身的层缓存。
+- 构建上下文固定为仓库根目录，tag 必须是 semver（没有任意 tag 的开关）。
 - 没有 webhook 通知：推送失败或成功都以 job 状态与日志呈现（不像 npm-publish 需要人工点链接）。
-- `secrets.X || vars.X` 依赖 Forgejo 的表达式兼容实现；若你使用的版本不支持，把 token 直接放 Secrets 并改成 `${{ secrets.X }}` 即可。
+- `secrets.X || vars.X` 依赖 Forgejo 的表达式实现；若你使用的版本不支持，把 token 直接放 Secrets 并改成 `${{ secrets.X }}` 即可。
 - 依赖 `actions/checkout@v4`（Forgejo 默认 actions registry）。若实例无法访问，改成全限定 URL `https://code.forgejo.org/actions/checkout@v4`。
 - 一个变体的产物不能复用给另一个变体（**这是设计目标**）：两个变体必须是各自可独立构建的 Dockerfile。
 
+### 已移除的变量与替代做法
+
+| 移除的变量 | 替代 |
+| --- | --- |
+| `GHCR_OWNER` / `GHCR_USER` | 用 `GHCR_IMAGE` 给完整镜像名（登录用户即命名空间） |
+| `DOCKER_IMAGE_NAME` | 用 `DOCKER_META_IMAGES` |
+| `DOCKER_DEFAULT_VARIANT` | 在变体表第五列给一个变体写 `true` |
+| `DOCKER_CONTEXT` | 构建上下文固定为仓库根目录；Dockerfile 路径仍可带子目录 |
+| `DOCKER_CACHE_FROM` / `DOCKER_CACHE_TO` / `DOCKER_PULL` / `DOCKER_NO_CACHE` / `DOCKER_PROVENANCE` | 无（缓存与 attestation 不再开放） |
+| `DOCKER_PUSH` | 只有 dry run 不推送；tag 触发即推送 |
+| `DOCKER_ALLOW_ANY_TAG` | 无（只支持 semver tag） |
+| `APK_REPOSITORY` / `YUM_REPOSITORY` | 用短名 `APK_REPO` / `YUM_REPO` |
+| `SKIP_TOOL_INSTALL` | 无（Action 不再安装任何东西） |
+| `GO_PROXY` | 用 `GOPROXY` |
+| `APK_PROXY` / `YUM_PROXY`（此处指仓库变量） | 用 `APT_PROXY`（镜像判别）或 `DOCKER_BUILD_ARGS` 显式传构建参数 |
+
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 118 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 102 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
-1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
+1. runner 是否放行了 socket（`valid_volumes`）并重启过，job 里能否 `docker version` / `docker buildx version`（CLI 与 buildx 由 job 镜像提供，见「构建与发布构建镜像」）。
 2. `actions/checkout@v4` 在该实例是否可达。
-3. `docker buildx version` 是否存在（没有会走降级路径，功能会少：单平台、无缓存导出）。
+3. 缺 `buildx` 时 `preflight` 会直接失败——错误里就是挂载清单，照着配即可。
 4. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除）。
 5. `secrets.GHCR_TOKEN || vars.GHCR_TOKEN` 这类表达式在该实例的解析结果是否符合预期。
 6. `${{ inputs.* }}` 是否被求值：不被求值时脚本会退回事件载荷并打警告（见「runner 不展开 `${{ inputs.* }}` 时」），功能不受影响。
@@ -493,7 +557,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 118 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 102 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

@@ -15,37 +15,36 @@
 # -> one build per variant -> push -> digest summary.
 #
 # Variants (built independently, each compiling its own artifact):
-#   alpine  -> tags suffixed -alpine
-#   trixie  -> tags suffixed -trixie PLUS the unsuffixed tags and `latest`
-# Every variant is one `docker build` invocation against its own Dockerfile;
-# nothing is shared between variants and no variant is produced by retagging
-# another one.
+#   alpine       -> tags suffixed -alpine
+#   trixie-slim  -> tags suffixed -trixie-slim PLUS the unsuffixed tags and `latest`
+# Every variant is one `docker buildx build` invocation against its own
+# Dockerfile; nothing is shared between variants and no variant is produced by
+# retagging another one. Each variant's row of the variant table travels with its
+# matrix entry (`spec`), so this file is the only place a variant is defined.
 #
 # Repository secrets/variables (tokens may live in either place):
 #   GHCR_TOKEN            GitHub PAT with write:packages -> enables ghcr.io
 #   DOCKERHUB_TOKEN       Docker Hub access token      -> enables Docker Hub
 #   DOCKERHUB_USERNAME    Docker Hub user + namespace  (required with the token)
-#   GHCR_OWNER / GHCR_IMAGE / GHCR_USER   when the GHCR namespace differs from the
-#                                         Forgejo owner (it usually does)
-# Optional variables: DOCKER_IMAGE_NAME, DOCKER_VARIANTS, DOCKER_DEFAULT_VARIANT,
-#   DOCKER_CONTEXT, DOCKER_META_IMAGES, DOCKER_META_TAGS, DOCKER_META_FLAVOR,
-#   DOCKER_META_LABELS, DOCKER_BUILD_ARGS, DOCKER_PLATFORMS, DOCKER_CACHE_FROM,
-#   DOCKER_CACHE_TO, DOCKER_PULL, DOCKER_NO_CACHE, DOCKER_PROVENANCE,
-#   DOCKER_ALLOW_ANY_TAG, SKIP_TOOL_INSTALL, and the endpoint variables
-#   (ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / NPM_PROXY /
-#   APK_REPO / YUM_REPO / APK_REPOSITORY / YUM_REPOSITORY / GOPROXY / GO_PROXY —
-#   see the env block below; APK_PROXY / YUM_PROXY no longer exist).
+#   GHCR_IMAGE            ghcr.io/<account>/<repo>, when the GHCR namespace
+#                         differs from the Forgejo owner (it usually does)
+# Optional variables:
+#   DOCKER_META_IMAGES, DOCKER_META_TAGS, DOCKER_META_FLAVOR, DOCKER_META_LABELS
+#   DOCKER_BUILD_ARGS, DOCKER_PLATFORMS, DOCKER_HOST, GHCR_IMAGE
+#   ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / NPM_PROXY / GOPROXY
+#   APK_REPO / YUM_REPO (explicit repositories; APK_REPO feeds the APK_PROXY arg)
+#   (see the env block below — that block is the complete, authoritative list)
 #
 # Shape: one job per variant (matrix). Each variant gets its own job container,
 # so an Alpine variant can run in an Alpine node image and a Debian one in a
 # Debian node image; they build in parallel and publish independently
-# (fail-fast: false). Adding a container is one matrix entry here, plus the
-# variant in DOCKER_VARIANTS and its Dockerfile — see the README.
+# (fail-fast: false). Adding a container is one matrix entry here, plus its
+# Dockerfile — see the README.
 #
-# Runner requirement: the job needs a reachable Docker daemon. A container job
-# reaches it only when the runner mounts the socket — see the README for the two
-# supported setups (`container.options` volume mount + runner `valid_volumes`,
-# or a host runner). preflight fails with that checklist printed.
+# Runner requirement: the job needs a `docker` CLI with the `buildx` plugin and a
+# reachable daemon. A container job gets none of that for free, so the mounts
+# below are part of the default setup; the runner must allow them in
+# `valid_volumes` and be restarted. See the README for all three setups.
 
 name: docker-publish
 
@@ -84,67 +83,77 @@ jobs:
   publish:
     name: docker build and push (${{ matrix.variant }})
     # One job per variant: each gets its own job container, its own build and its
-    # own push. The product is still decided by the variant's Dockerfile — this
-    # only decides where the scripts run, so an Alpine variant can run in an
-    # Alpine node image and a Debian one in a Debian node image.
+    # own push. The product is still decided by the variant's Dockerfile — the job
+    # container only decides where the scripts run, so both variants share this
+    # repository's builder image (root Dockerfile.builder: docker CLI + buildx + node).
     #
-    # Adding a container is three lines here, plus the variant itself in the
-    # repository variable DOCKER_VARIANTS and its Dockerfile:
+    # Each entry carries its variant's own row of the variant table (`spec`), in
+    # exactly the syntax DOCKER_VARIANTS uses:
+    #   name|dockerfile|target|suffix|default|KEY=VALUE;…
+    # So a variant's tags, its Dockerfile and its toolchain image all come from
+    # the matrix; adding another job container is one block here (plus the file):
     #   - variant: bookworm
-    #     image: node:lts
-    # (Optional per-entry keys are yours to add, e.g. a `platforms:` field if you
-    # later make DOCKER_PLATFORMS matrix-driven.)
+    #     image: ghcr.io/<account>/message-pusher-builder:1
+    #     spec: bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
+    # `variant` is only the job name and the per-job filter — the name inside
+    # `spec` is the one that matters. Exactly one row should say `true`: that row
+    # owns `latest` and the unsuffixed tags. A row saying `false` is taken at its
+    # word, so a per-job table can never publish `latest` twice.
     #
     # `fail-fast: false` keeps the variants independent: one failing must not
     # cancel the other's publish. Only the default variant (trixie by default)
     # produces `latest` and the unsuffixed tags, so a failed alpine job can never
     # move `latest`.
     #
-    # Tip: mounting the host's docker CLI into every job container is cheaper
-    # than installing it in each one (Alpine needs apk, Debian needs apt):
-    #   options: >-
-    #     --volume /var/run/docker.sock:/var/run/docker.sock
-    #     --volume /usr/bin/docker:/usr/bin/docker:ro
-    #     --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
+    # The job container needs the docker CLI, the buildx plugin and node. All three
+    # come from the builder image (root Dockerfile.builder), published by the
+    # `builder-image` job at the end of this file — so only the daemon socket is
+    # mounted here. Publish that image BEFORE tagging a release, otherwise this job
+    # cannot pull its container image.
+    #
+    # Without that image you have two other options (see .forgejo/README.md):
+    # mount the host's docker CLI + cli-plugins as well, or use a host runner.
     runs-on: docker
     strategy:
       fail-fast: false
       matrix:
         include:
+          # 两行共用同一个构建镜像；改 GHCR 命名空间时，这里（两处）与文件末尾
+          # builder-image 作业里的 IMAGE 必须同时改，否则 job 拉不到镜像。
           - variant: alpine
-            image: node:lts-alpine
+            image: ghcr.io/beyondandsharp/message-pusher-builder:1
+            spec: alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
           - variant: trixie-slim
-            image: node:lts-trixie-slim
+            image: ghcr.io/beyondandsharp/message-pusher-builder:1
+            spec: trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
     container:
       image: ${{ matrix.image }}
-      # A container job only reaches the daemon when the socket is mounted (and
-      # the runner's valid_volumes allows it):
-      # options: --volume /var/run/docker.sock:/var/run/docker.sock
+      # The Action never installs docker: the CLI, the buildx plugin and node come
+      # from the builder image. Only the daemon socket is mounted here, so the runner
+      # needs just this one entry in `valid_volumes` (then restart it):
+      #   runner:
+      #     container:
+      #       valid_volumes: ["/var/run/docker.sock"]
+      options: >-
+        --volume /var/run/docker.sock:/var/run/docker.sock
     timeout-minutes: 120
     env:
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
       GHCR_IMAGE: ${{ vars.GHCR_IMAGE }}
-      GHCR_OWNER: ${{ vars.GHCR_OWNER }}
-      GHCR_USER: ${{ vars.GHCR_USER }}
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
-      DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
-      DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
-      DOCKER_DEFAULT_VARIANT: ${{ vars.DOCKER_DEFAULT_VARIANT }}
-      DOCKER_CONTEXT: ${{ vars.DOCKER_CONTEXT }}
+      # The variant table for THIS job comes from its matrix entry. Prefer the
+      # repository variable instead? Use `DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}`.
+      DOCKER_VARIANTS: ${{ matrix.spec }}
+      # Where the daemon lives (tcp://… or a non-default unix socket). Unset means
+      # /var/run/docker.sock, which the job container must have mounted.
+      DOCKER_HOST: ${{ vars.DOCKER_HOST }}
       DOCKER_META_IMAGES: ${{ vars.DOCKER_META_IMAGES }}
       DOCKER_META_TAGS: ${{ vars.DOCKER_META_TAGS }}
       DOCKER_META_FLAVOR: ${{ vars.DOCKER_META_FLAVOR }}
       DOCKER_META_LABELS: ${{ vars.DOCKER_META_LABELS }}
       DOCKER_BUILD_ARGS: ${{ vars.DOCKER_BUILD_ARGS }}
       DOCKER_PLATFORMS: ${{ vars.DOCKER_PLATFORMS }}
-      DOCKER_CACHE_FROM: ${{ vars.DOCKER_CACHE_FROM }}
-      DOCKER_CACHE_TO: ${{ vars.DOCKER_CACHE_TO }}
-      DOCKER_PULL: ${{ vars.DOCKER_PULL }}
-      DOCKER_NO_CACHE: ${{ vars.DOCKER_NO_CACHE }}
-      DOCKER_PROVENANCE: ${{ vars.DOCKER_PROVENANCE }}
-      DOCKER_ALLOW_ANY_TAG: ${{ vars.DOCKER_ALLOW_ANY_TAG }}
-      SKIP_TOOL_INSTALL: ${{ vars.SKIP_TOOL_INSTALL }}
       INPUT_VERSION: ${{ inputs.version }}
       # Each job builds only its own variant (the matrix entry); a manual
       # dispatch can still narrow it further via the `variants` input.
@@ -152,7 +161,7 @@ jobs:
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
       # Endpoint variables (the same model as npm-publish).
       #   APT_PROXY / NPM_PROXY — the value may be a real forward proxy OR an
-      #     internal MIRROR/registry: ensure-tools probes it (does it serve its
+      #     internal MIRROR/registry: the resolve step probes it (does it serve its
       #     own index?) and uses it accordingly — apt as a repository, npm as the
       #     build's registry (injected as --build-arg NPM_REGISTRY), and only a
       #     genuine proxy as a proxy.
@@ -162,21 +171,19 @@ jobs:
       HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
       NO_PROXY: ${{ vars.NO_PROXY }}
       APT_PROXY: ${{ vars.APT_PROXY }}
+      # Explicit repositories (never probed): APK_REPO feeds the APK_PROXY build
+      # arg, YUM_REPO is passed through as `--build-arg YUM_REPO`.
+      APK_REPO: ${{ vars.APK_REPO }}
+      YUM_REPO: ${{ vars.YUM_REPO }}
       NPM_PROXY: ${{ vars.NPM_PROXY }}
       # Explicit package mirrors (comma separated; a bare mirror root is fine —
       # the distro paths come from the image's os-release). Setting one skips the
       # probe entirely. apk/yum mirrors go here, not into a *_PROXY variable; the
       # longer *_REPOSITORY names are still accepted. There is no APK_PROXY /
       # YUM_PROXY any more.
-      APK_REPO: ${{ vars.APK_REPO }}
-      YUM_REPO: ${{ vars.YUM_REPO }}
-      APK_REPOSITORY: ${{ vars.APK_REPOSITORY }}
-      YUM_REPOSITORY: ${{ vars.YUM_REPOSITORY }}
       # Go module proxy: passed into the build as --build-arg GOPROXY, so a
-      # Dockerfile that declares ARG GOPROXY reaches an internal Athens. GO_PROXY
-      # is accepted as the same thing.
-      GOPROXY: ${{ vars.GOPROXY || vars.GO_PROXY }}
-      GO_PROXY: ${{ vars.GO_PROXY }}
+      # Dockerfile that declares ARG GOPROXY reaches an internal Athens.
+      GOPROXY: ${{ vars.GOPROXY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -198,14 +205,6 @@ jobs:
           [ -f "$dir/scripts/build-push.mjs" ] || dir="$GITHUB_WORKSPACE/.forgejo"
           [ -f "$dir/scripts/build-push.mjs" ] || dir="$(dirname "$(dirname "$(find "$GITHUB_WORKSPACE" -maxdepth 6 -name build-push.mjs -path '*/scripts/*' -print -quit)")")"
           node "$dir/scripts/run.mjs" locate-action
-
-      # Install the docker CLI (and buildx when the image ships it) with the
-      # image's own package manager, through the configured proxy. Skipped
-      # automatically when both are present; SKIP_TOOL_INSTALL=true opts out.
-      - name: Ensure container tools
-        run: |
-          dir="${{ steps.locate.outputs.forgejo_dir }}"
-          node "$dir/scripts/run.mjs" ensure-tools
 
       - name: Verify action scripts
         run: |
@@ -241,3 +240,48 @@ jobs:
         run: |
           dir="${{ steps.locate.outputs.forgejo_dir }}"
           node "$dir/scripts/run.mjs" summary
+
+  # Build and publish the builder image (root Dockerfile.builder) used by the
+  # publish job's container above. Manual only, and deliberately without
+  # `container:` — it runs on the runner host with the runner's own docker, so
+  # there is no chicken-and-egg between the job container and this image.
+  #
+  # The image reference below must match the matrix `image:` entries in `publish`.
+  builder-image:
+    name: build and push the builder image
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: docker
+    timeout-minutes: 30
+    env:
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
+      GHCR_OWNER: ${{ vars.GHCR_OWNER || vars.GHCR_USER || github.repository_owner }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
+      IMAGE: ghcr.io/beyondandsharp/message-pusher-builder:1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show tool versions
+        run: |
+          docker --version
+          docker buildx version
+
+      - name: Build builder image
+        run: docker build -f Dockerfile.builder -t "$IMAGE" .
+
+      - name: Log in and push to GHCR
+        run: |
+          [ -n "$GHCR_TOKEN" ] || { echo "缺少 GHCR_TOKEN：无法推送 $IMAGE" >&2; exit 1; }
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_OWNER" --password-stdin
+          docker push "$IMAGE"
+
+      - name: Push to Docker Hub (skipped when no token)
+        run: |
+          if [ -z "$DOCKERHUB_TOKEN" ] || [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "未配置 Docker Hub 凭据，跳过。"
+            exit 0
+          fi
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          docker tag "$IMAGE" "$DOCKERHUB_USERNAME/message-pusher-builder:1"
+          docker push "$DOCKERHUB_USERNAME/message-pusher-builder:1"

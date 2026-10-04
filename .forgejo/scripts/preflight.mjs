@@ -5,13 +5,13 @@
 // Dockerfiles that must exist, tag collisions between variants, and whether the
 // runner can actually reach a Docker daemon.
 //
-// Failures are hard errors with an actionable message; degradations (missing
-// buildx) are warnings, because build-push.mjs has a fallback for them.
+// Every finding is a hard error with an actionable message: there are no
+// degradations left, because build-push.mjs only knows how to drive buildx.
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { probeDocker } from './deps.mjs';
+import { probeDocker } from './endpoints.mjs';
 import { readOptional } from './config.mjs';
 import { computeBuilds } from './meta.mjs';
 import { statePath } from './resolve.mjs';
@@ -31,13 +31,33 @@ export const IS_DIRECT = (() => {
 export const DOCKER_HELP = [
   'runner 侧检查清单：',
   '  1) 宿主机 runner（workflow 里不写 container:）：确认 runner 用户能访问 /var/run/docker.sock；',
-  '  2) docker runner（写了 container:）：需要把 socket 挂进容器 ——',
+  '  2) docker runner（写了 container:）：job 容器默认看不到宿主机的 socket，需要挂进去 ——',
   '       container:',
-  '         image: node:22-bookworm',
-  '         options: --volume /var/run/docker.sock:/var/run/docker.sock',
-  '     并在 runner 配置的 valid_volumes 里允许该路径；',
-  '  3) 容器内以 root 运行（本 Action 默认如此），非 root 需要加进 docker 组。',
+  '         image: ${{ matrix.image }}',
+  '         options: >-',
+  '           --volume /var/run/docker.sock:/var/run/docker.sock',
+  '           --volume /usr/bin/docker:/usr/bin/docker:ro',
+  '           --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro',
+  '     并在 runner 配置里放行这些路径、然后**重启 runner**：',
+  '       runner:',
+  '         container:',
+  '           valid_volumes: ["/var/run/docker.sock", "/usr/bin/docker", "/usr/libexec/docker/cli-plugins"]',
+  '     （第 2 条同时解决 docker CLI 与 buildx：两者都必须来自挂载或镜像，Action 不再自己安装）',
+  '  3) 容器内以 root 运行（本 Action 默认如此），非 root 需要加进 docker 组；',
+  '  4) daemon 不在默认位置时，用仓库变量 DOCKER_HOST 指定（如 tcp://host:2375 或 unix:///run/user/1000/docker.sock），',
+  '     或在 runner 配置里设 container.docker_host。',
 ].join('\n');
+
+/** A sharper reason than "docker version failed": socket absent vs daemon refusing. */
+export function dockerUnreachableReason(docker) {
+  if (docker.socketPresent === false) {
+    return `容器内看不到 ${docker.socketPath}：socket 没有挂进 job 容器（清单第 2 条），或它不在默认路径（用 DOCKER_HOST 指定）`;
+  }
+  if (docker.socketPresent === true) {
+    return `${docker.socketPath} 存在但守护进程不可达：检查权限/守护进程状态（清单第 3 条）`;
+  }
+  return `DOCKER_HOST=${docker.host || '<unset>'} 不可达`;
+}
 
 /** Which files a build plan needs. `target` selects a stage inside the file. */
 export function missingDockerfiles(builds, context, exists = existsSync) {
@@ -70,7 +90,7 @@ export function preflightChecks({
   if (halfConfigured.length > 0) {
     errors.push(
       `${halfConfigured.join(' / ')} 配置不完整：Docker Hub 需要 DOCKERHUB_USERNAME + DOCKERHUB_TOKEN，` +
-        'ghcr.io 需要 GHCR_OWNER/GHCR_IMAGE（或仓库 owner）与 GHCR_TOKEN',
+        'ghcr.io 需要 GHCR_IMAGE（或仓库 owner）与 GHCR_TOKEN',
     );
   }
   if (enabled.length === 0 && !state.dryRun) {
@@ -110,18 +130,17 @@ export function preflightChecks({
   if (!docker.cli) {
     errors.push(`runner 里没有 docker 命令：${docker.error}\n${DOCKER_HELP}`);
   } else if (!docker.daemon) {
-    errors.push(`连不上 Docker 守护进程（docker version 失败：${docker.error || 'unknown'}）\n${DOCKER_HELP}`);
-  } else if (state.options.platforms.length > 1 && !docker.buildx) {
-    errors.push(`DOCKER_PLATFORMS=${state.options.platforms.join(',')} 需要 docker buildx，但 runner 里没有 buildx`);
+    errors.push(
+      `连不上 Docker 守护进程：${dockerUnreachableReason(docker)}\n` +
+        `docker version 的原始报错：${docker.error || 'unknown'}\n${DOCKER_HELP}`,
+    );
   } else if (!docker.buildx) {
-    warnings.push(
-      '没有 docker buildx：将降级为 docker build + docker tag + docker push（单平台、无缓存导出、无 provenance）',
+    errors.push(
+      'runner 里没有 docker buildx：本 Action 只用 `docker buildx build`（没有经典构建回退）。\n' +
+        `${DOCKER_HELP}`,
     );
   }
 
-  if (!state.options.push && !state.dryRun) {
-    warnings.push('DOCKER_PUSH=false：只构建，不推送镜像');
-  }
   if (state.dryRun) {
     warnings.push('dry run：不登录、不推送，只验证构建（--output type=cacheonly）');
   }
