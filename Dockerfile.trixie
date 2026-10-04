@@ -1,15 +1,16 @@
-# trixie 变体：运行时是 Debian trixie（glibc），与 Dockerfile.alpine（musl）互为独立变体。
-# 前端（Node）和后端（Go）依旧都在容器内编译，宿主机只需要有 docker。
+# trixie 变体：从构建到运行全部使用 Debian trixie，与 Dockerfile.alpine（全 Alpine）
+# 完全分离 —— 两个变体不共享任何构建阶段、工具链或产物。
 #
-# 为什么构建阶段仍用 Alpine：Go 侧是 CGO + 全静态链接的二进制，用 musl 工具链编译出来
-# 是真正自包含的（DNS 解析等都不依赖运行时库）；反过来若用 glibc 做静态链接，运行时的
-# DNS 解析要靠 dlopen，反而容易出现解析失败。所以这里只把**运行时**换成 Debian，
-# 二进制本身与 alpine 变体一致，两个变体各自独立构建、互不共享产物。
+# 与 alpine 变体的两个实质差异：
+#   1. 构建阶段用 Debian 工具链（node:24-trixie-slim / golang:1.27-trixie），运行时 debian:trixie-slim
+#   2. 因此这里**不做**静态链接（不加 -extldflags '-static'）：目标运行时就是 glibc，
+#      动态链接让 DNS 解析走正常的 glibc 路径（glibc 静态链接反而要依赖运行时 dlopen 解析 DNS，
+#      容易出问题）；alpine 变体是 musl 静态链接的自包含二进制。两条链互不影响。
 #
 # 用法见同目录的 build-image.sh（--variant trixie）。
 
-# ---------------------------------------------------------------- 前端
-FROM node:24-alpine AS frontend
+# ---------------------------------------------------------------- 前端（Debian）
+FROM node:24-trixie-slim AS frontend
 
 ARG VERSION=dev
 ARG NPM_REGISTRY=https://registry.npmjs.org
@@ -37,15 +38,16 @@ RUN rm -rf build
 # Vite 在构建时把 import.meta.env.VITE_* 静态替换进产物，这里注入版本号（对应页脚的显示）
 RUN VITE_APP_VERSION="${VERSION}" pnpm run build
 
-# ---------------------------------------------------------------- 后端
-FROM golang:1.27-alpine AS backend
+# ---------------------------------------------------------------- 后端（Debian 工具链）
+FROM golang:1.27-trixie AS backend
 
 ARG VERSION=dev
 # Go 模块代理：默认走局域网里的 Athens 缓存代理（实测冷缓存拉全依赖约 10 秒）。
 # 可用 --build-arg GOPROXY=... 覆盖；传空字符串则回落到 Go 自带的 proxy.golang.org。
 ARG GOPROXY=http://192.168.2.12:50100,direct
-ARG APK_PROXY=""
 ARG APT_PROXY=""
+# 本变体不使用 Alpine；APK_PROXY 仅为兼容脚本/CI 统一传入的构建参数而声明。
+ARG APK_PROXY=""
 
 ENV GO111MODULE=on \
     CGO_ENABLED=1 \
@@ -54,19 +56,13 @@ ENV GO111MODULE=on \
 
 WORKDIR /build
 
-# 把包管理器指向缓存代理：Alpine 改写 /etc/apk/repositories，Debian 系写 apt 的 http 代理配置。
-# 这类代理（如 soulteary/apt-proxy）是把上游域名拼进 path 的反向代理，不是通用前向代理，
-# 而且 Alpine 默认仓库是 https（前向代理不支持 CONNECT），所以必须改写仓库地址。
-# APK_PROXY / APT_PROXY 为空时这一步不做任何事。
-RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
-      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
-    fi; \
-    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+# 把 apt 指向缓存代理：这类代理（如 soulteary/apt-proxy）是把上游域名拼进 path 的反向代理。
+# APT_PROXY 为空时这一步不做任何事。
+RUN if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
       printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
     fi
 
-# go-sqlite3 依赖 CGO，alpine 下需要 gcc 等工具链
-RUN apk add --no-cache build-base
+# go-sqlite3 依赖 CGO；golang:1.27-trixie 自带 gcc 与 libc6-dev，无需再装构建工具链。
 
 # 依赖单独一层：go.mod / go.sum 不变时可以复用构建缓存；
 # 缓存挂载让已下载的模块在重复构建/失败重试之间保留下来。
@@ -79,16 +75,17 @@ COPY . .
 # main.go 里的 //go:embed web/build 需要前端产物
 COPY --from=frontend /build/web/build ./web/build
 
+# 动态链接 glibc（不加 -static），与 debian:trixie-slim 运行时匹配
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
+    go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}'" -o message-pusher
 
 # ---------------------------------------------------------------- 运行时（Debian trixie）
 FROM debian:trixie-slim
 
 ARG VERSION=dev
-ARG APK_PROXY=""
 ARG APT_PROXY=""
+ARG APK_PROXY=""
 LABEL org.opencontainers.image.title="message-pusher" \
       org.opencontainers.image.version="${VERSION}"
 

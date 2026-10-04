@@ -135,12 +135,15 @@ sudo service nginx restart
 ./build-image.sh --variant alpine    # alpine 变体（运行时 Alpine）
 ```
 
-两个变体与 CI 的发布变体一一对应，各自独立编译、互不共享产物：
+两个变体与 CI 的发布变体一一对应，**两条构建链完全分离**：各自的基础镜像、构建阶段、工具链和产物互不共享。
 
-| 变体 | Dockerfile | 运行时 | 默认标签 |
-|---|---|---|---|
-| `trixie`（默认） | `Dockerfile.trixie` | Debian trixie（glibc） | `message-pusher:<版本>`，对应 `latest` |
-| `alpine` | `Dockerfile.alpine` | Alpine（musl） | `message-pusher:<版本>-alpine` |
+| 变体 | Dockerfile | 构建链 | 运行时 | 二进制 | 默认标签 |
+|---|---|---|---|---|---|
+| `trixie`（默认） | `Dockerfile.trixie` | 全 Debian（`node:24-trixie-slim` / `golang:1.27-trixie`） | `debian:trixie-slim`（glibc） | 动态链接 glibc | `message-pusher:<版本>`，对应 `latest` |
+| `alpine` | `Dockerfile.alpine` | 全 Alpine（`node:24-alpine` / `golang:1.27-alpine`） | `alpine:3.24`（musl） | musl 静态链接 | `message-pusher:<版本>-alpine` |
+
+两个变体的链接方式不同是有意的：alpine 侧用 musl 编译成自包含的静态二进制；trixie 侧面向 glibc 运行时，
+用动态链接（glibc 的静态链接反而要依赖运行时 `dlopen` 解析 DNS，容易出问题）。
 
 脚本选项：
 
