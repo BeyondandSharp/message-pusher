@@ -177,7 +177,7 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
 
 | 环境变量 | 用途 |
 |---|---|
-| `APK_PROXY` / `APT_PROXY` | apk / apt 包缓存代理：Alpine 改写 `/etc/apk/repositories`，Debian 系改写 sources 的 URI（path 型反向代理，不能用 http_proxy）。`APK_PROXY` 未设置时沿用 `APT_PROXY` |
+| `APK_PROXY` / `APK_REPO` / `APT_PROXY` | apk / apt 包缓存代理：Alpine 改写 `/etc/apk/repositories`，Debian 系改写 sources 的 URI（path 型反向代理，不能用 http_proxy）。取值顺序 `APK_PROXY` → `APK_REPO` → `APT_PROXY` |
 | `GOPROXY` | Go 模块代理（不设置则用 Go 官方代理） |
 | `NPM_PROXY` / `NPM_REGISTRY` | npm registry（容器内安装 pnpm 与前端依赖时使用；不设置则用官方源） |
 

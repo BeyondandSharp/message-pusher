@@ -19,7 +19,7 @@
 #   ./build-image.sh --no-save                # 只构建镜像，不导出镜像文件
 #
 # 三类包下载代理全部通过环境变量传入，都没有默认值；不设置就走各语言的官方源：
-#   APK_PROXY / APT_PROXY   apk / apt 包缓存代理（改写容器内仓库地址）
+#   APK_PROXY / APK_REPO / APT_PROXY   apk / apt 包缓存代理（改写容器内仓库地址）
 #   GOPROXY                 Go 模块代理（不设置则用 Go 官方代理 proxy.golang.org）
 #   NPM_PROXY / NPM_REGISTRY  前端 npm registry（不设置则用官方源）
 # 例如：NPM_PROXY=https://registry.npmmirror.com ./build-image.sh
@@ -126,10 +126,11 @@ echo "==> 镜像：${IMAGE}"
 # 例如：APK_PROXY=https://your-apt-proxy ./build-image.sh
 APK_PROXY="${APK_PROXY-}"
 APT_PROXY="${APT_PROXY-}"
-# 同一个缓存服务通常同时代理 apt 与 apk；APK_PROXY 未单独设置时沿用 APT_PROXY（不是写死的默认值）
-APK_PROXY="${APK_PROXY:-${APT_PROXY}}"
+# 取值顺序（都不是写死的默认值）：APK_PROXY -> APK_REPO -> APT_PROXY
+#   APK_REPO 是 apk 镜像单独的变量名；同一个缓存服务同时代理 apt/apk 时也可共用 APT_PROXY
+APK_PROXY="${APK_PROXY:-${APK_REPO:-${APT_PROXY}}}"
 
-# Go 模块代理：默认走自建缓存代理；设为空字符串则用 Go 自带默认（proxy.golang.org）
+# Go 模块代理：未设置则用 Go 自带默认（proxy.golang.org）
 GOPROXY="${GOPROXY-}"
 
 BUILD_ARGS=(--build-arg "VERSION=${VERSION}" \

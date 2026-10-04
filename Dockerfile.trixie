@@ -90,23 +90,41 @@ ENV PORT=3000 \
 
 # 本阶段不需要 apt（golang:1.27-trixie 自带 gcc 与 libc6-dev）
 
-# debian:*-slim 既没有 CA 证书库也没有时区数据。分两步引导：
-#   1) 先用镜像自带的官方源装 ca-certificates —— 这些源是 http，不需要证书校验；
-#   2) 如果配置了 APT_PROXY（通常是 https 自建镜像），再改写 sources 由它装 tzdata。
-# 这样无论是否有内网镜像、无论镜像是否 https，都能装上。
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN if [ -n "${APT_PROXY}" ]; then \
+# debian:*-slim 既没有 CA 证书库也没有时区数据，而自建镜像通常是 https：
+# 没有证书库时 apt 会以 "certificate verify failed" 失败。引导方式（主流程仍走 https）：
+#   1) 若给了 APT_PROXY，先把它换成 http 形式（同一个镜像的 80 端口）改写 sources，
+#      装上 ca-certificates —— http 不需要证书校验，因此这一步一定能过；
+#   2) 再把 sources 切回 APT_PROXY 原值（https），装 tzdata。
+# 未设置 APT_PROXY 时直接用镜像自带的官方源装（http，也不需要证书）。
+RUN set -eux; \
+    # 原始 sources 先备份，引导阶段与主流程各改写一次再各自还原，避免前缀叠加
+    cp -a /etc/apt/sources.list.d /tmp/sources.d.bak; \
+    cp -a /etc/apt/sources.list /tmp/sources.list.bak 2>/dev/null || true; \
+    rewrite_sources() { \
       for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
         [ -f "$f" ] || continue; \
-        sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${APT_PROXY}/|g; s|^deb[[:space:]]+https?://|deb ${APT_PROXY}/|g" "$f"; \
+        sed -i -E "s|URIs:[[:space:]]*https?://|URIs: $1/|g; s|^deb[[:space:]]+https?://|deb $1/|g" "$f"; \
       done; \
+    }; \
+    restore_sources() { \
+      rm -rf /etc/apt/sources.list.d; \
+      cp -a /tmp/sources.d.bak /etc/apt/sources.list.d; \
+      [ -f /tmp/sources.list.bak ] && cp -a /tmp/sources.list.bak /etc/apt/sources.list || true; \
+    }; \
+    if [ -n "${APT_PROXY}" ]; then \
+      APT_PROXY_HTTP="$(printf '%s' "${APT_PROXY}" | sed -E 's|^https://|http://|')"; \
+      rewrite_sources "${APT_PROXY_HTTP}"; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends ca-certificates; \
+      restore_sources; \
+      rewrite_sources "${APT_PROXY}"; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends tzdata; \
+    else \
+      apt-get update; \
+      apt-get install -y --no-install-recommends ca-certificates tzdata; \
     fi; \
-    apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend /build/message-pusher /
 EXPOSE 3000
