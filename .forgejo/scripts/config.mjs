@@ -15,8 +15,42 @@
 // *name* of the variable holding the token, so a caller cannot accidentally
 // serialise a credential into the state file.
 
-/** The built-in variant table: the Alpine and Debian (trixie) builds. */
-export const DEFAULT_VARIANTS = ['alpine|Dockerfile.alpine', 'trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true'].join('\n');
+import { readFileSync } from 'node:fs';
+
+/**
+ * The built-in variant table: the Alpine and Debian (trixie) builds, each for
+ * both supported architectures. It is only the fallback — a repository normally
+ * owns this table in `.forgejo/variants.txt` or in the `DOCKER_VARIANTS`
+ * variable, so the shipped workflow stays free of project names.
+ */
+export const DEFAULT_VARIANTS = [
+  'alpine|Dockerfile.alpine||-alpine|false||linux/amd64,linux/arm64',
+  'trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true||linux/amd64,linux/arm64',
+].join('\n');
+
+/**
+ * The variant table this run should use, from the same three sources every
+ * program shares (so `plan-matrix`, `prepare` and `resolve` can never disagree):
+ *
+ *   1. `DOCKER_VARIANTS` (repository variable / workflow env) — highest;
+ *   2. the file `DOCKER_VARIANTS_FILE` points at (normally
+ *      `<forgejo_dir>/variants.txt`, exported by locate-action);
+ *   3. the built-in DEFAULT_VARIANTS.
+ */
+export function variantTableRaw(env = process.env, { readFile = readFileSync } = {}) {
+  const explicit = readOptional(env.DOCKER_VARIANTS);
+  if (explicit) return explicit;
+  const file = readOptional(env.DOCKER_VARIANTS_FILE);
+  if (file) {
+    try {
+      const text = readFile(file, 'utf8');
+      if (readOptional(text)) return text;
+    } catch {
+      // No file: fall through to the built-in default.
+    }
+  }
+  return DEFAULT_VARIANTS;
+}
 
 /** Registries this Action knows how to log in to and push to. */
 export const REGISTRIES = {
@@ -86,14 +120,45 @@ export function parseVariantBuildArgs(raw) {
 }
 
 /**
+ * The architectures of a platform list, e.g. `linux/amd64,linux/arm64`.
+ * A bare `linux/arm/v7` is accepted too (three segments).
+ */
+const PLATFORM = /^[a-z0-9]+\/[a-z0-9]+(?:\/[a-z0-9]+)?$/;
+
+export function parsePlatforms(raw) {
+  return String(raw ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
+    .map((item) => {
+      if (!PLATFORM.test(item)) throw new Error(`平台名非法：${item}（应形如 linux/amd64 或 linux/arm/v7）`);
+      return item;
+    });
+}
+
+/**
+ * The platforms one variant is built for: its own seventh column when present,
+ * otherwise the global `DOCKER_PLATFORMS` (empty = the runner's own platform).
+ */
+export function platformsFor(variant, options = {}) {
+  const own = (variant && variant.platforms) || [];
+  if (own.length > 0) return own;
+  return (options && options.platforms) || [];
+}
+
+/**
  * Parse the variant table.
  *
- *   <name>|<dockerfile>|<target>|<suffix>|<is-default>|<KEY=VALUE;…>
+ *   <name>|<dockerfile>|<target>|<suffix>|<is-default>|<KEY=VALUE;…>|<platforms>
  *
  * Only the name is required; the rest defaults to `Dockerfile.<name>`, no
- * target, `-<name>` suffix, "not the default variant" and no extra build args.
- * The literal suffix `none` means "no suffix at all" (useful when
- * DOCKER_META_TAGS already distinguishes variants).
+ * target, `-<name>` suffix, "not the default variant", no extra build args and
+ * the global `DOCKER_PLATFORMS`. The literal suffix `none` means "no suffix at
+ * all" (useful when DOCKER_META_TAGS already distinguishes variants).
+ *
+ * The seventh column is a comma separated platform list (`linux/amd64,
+ * linux/arm64`): it is what makes a variant multi-architecture without touching
+ * the workflow, and it is optional — a six-column row keeps working.
  *
  * The fifth column is the only thing that decides which variant owns `latest`
  * and the unsuffixed tags: exactly one row must say `true`, and a table with a
@@ -109,7 +174,8 @@ export function parseVariants(raw = DEFAULT_VARIANTS) {
   const variants = [];
   const seen = new Set();
   for (const line of lines) {
-    const [name = '', dockerfile = '', target = '', suffix, flag = '', argsRaw = ''] = line.split('|').map((part) => part.trim());
+    const parts = line.split('|').map((part) => part.trim());
+    const [name = '', dockerfile = '', target = '', suffix, flag = '', argsRaw = '', platformsRaw = ''] = parts;
     if (!VARIANT_NAME.test(name)) {
       throw new Error(`变体名非法：${name || '<empty>'}（只允许小写字母/数字/._-，且以字母或数字开头）`);
     }
@@ -122,6 +188,7 @@ export function parseVariants(raw = DEFAULT_VARIANTS) {
       suffix: suffix === undefined || suffix === '' ? `-${name}` : suffix === 'none' ? '' : suffix,
       isDefault: flag === 'true',
       buildArgs: parseVariantBuildArgs(argsRaw),
+      platforms: parsePlatforms(platformsRaw),
     });
   }
 

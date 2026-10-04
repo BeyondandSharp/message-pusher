@@ -139,7 +139,16 @@ async function main() {
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `forgejo_dir=${dir}\n`);
   }
+  // Every later step needs two things this program already knows: the action
+  // directory itself, and where the repository's variant table lives (inside the
+  // copied directory). Exporting them through $GITHUB_ENV is what lets every
+  // step stay a one-liner and lets plan-matrix/prepare/resolve agree on the
+  // table without the workflow carrying a per-step path.
+  if (process.env.GITHUB_ENV) {
+    appendFileSync(process.env.GITHUB_ENV, `FORGEJO_DIR=${dir}\nDOCKER_VARIANTS_FILE=${join(dir, 'variants.txt')}\n`);
+  }
   process.stdout.write(`Action 目录：${dir}\n`);
+  process.stdout.write(`变体表文件：${join(dir, 'variants.txt')}（存在才使用；也可用 DOCKER_VARIANTS 变量覆盖）\n`);
 }
 
 if (IS_DIRECT) {

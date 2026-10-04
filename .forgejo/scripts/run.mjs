@@ -39,6 +39,8 @@ export const IS_DIRECT = (() => {
 /** Programs that are executed as their own process (they own process.exit). */
 const PROGRAMS = {
   'locate-action': 'locate-action.mjs',
+  'plan-matrix': 'matrix.mjs',
+  prepare: 'prepare.mjs',
   resolve: 'resolve.mjs',
   preflight: 'preflight.mjs',
   login: 'login.mjs',
@@ -53,6 +55,8 @@ export const REQUIRED_SCRIPTS = [
   'locate-action.mjs',
   'run.mjs',
   'config.mjs',
+  'matrix.mjs',
+  'prepare.mjs',
   'resolve.mjs',
   'preflight.mjs',
   'login.mjs',
@@ -64,6 +68,8 @@ export const REQUIRED_SCRIPTS = [
 export const SUBCOMMANDS = [
   'locate-action',
   'verify-action',
+  'plan-matrix',
+  'prepare',
   'resolve',
   'preflight',
   'login',
@@ -127,13 +133,13 @@ async function verifyAction(env) {
   );
   if (!docker.daemon) {
     process.stdout.write(
-      '提示：本 Action 需要 runner 提供可访问的 Docker 守护进程（挂载 /var/run/docker.sock），' +
-        'preflight 会在真正构建前再次检查。\n',
+      '提示：daemon 暂不可达。默认接法下 job 容器就是 docker:dind，' +
+        'prepare 步骤会在容器内启动 dockerd（runner 需要 container.privileged: true）。\n',
     );
   }
   if (!docker.buildx) {
     process.stdout.write('提示：本 Action 只用 `docker buildx build`，缺 buildx 时 preflight 会失败；\n');
-    process.stdout.write('      把宿主机的 docker CLI 与 cli-plugins 挂进 job 容器，或改用自带它们的镜像。\n');
+    process.stdout.write('      默认 docker:dind / docker:cli 自带 buildx，prepare 也会尝试补装。\n');
   }
   return 0;
 }

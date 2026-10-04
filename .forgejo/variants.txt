@@ -1,0 +1,12 @@
+# message-pusher 的发布变体；即 workflow 的矩阵来源。
+#
+# 语法与仓库变量 DOCKER_VARIANTS 完全相同，每行一个变体：
+#   <名字>|<Dockerfile>|<target>|<后缀>|<是否默认>|<KEY=VALUE;…>|<平台,平台>
+#   - 只有名字必需；其余默认 Dockerfile.<名字>、无 target、-<名字>、非默认、无额外构建参数；
+#   - 第 5 列在整个表里必须恰好有一个 true（拥有 latest 与无后缀标签）；
+#   - 第 6 列是该变体自己的 build args（分号分隔），Dockerfile 里声明 ARG 才会生效；
+#   - 第 7 列是平台（逗号分隔），留空则用仓库变量 DOCKER_PLATFORMS。
+# 想改变体/架构只改这个文件（或设置 DOCKER_VARIANTS 变量），workflow 不用动。
+
+alpine|Dockerfile.alpine||-alpine|false||linux/amd64,linux/arm64
+trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true||linux/amd64,linux/arm64

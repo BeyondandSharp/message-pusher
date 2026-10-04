@@ -15,9 +15,11 @@ import {
   buildOptionsFrom,
   imagesFrom,
   parseVariants,
+  platformsFor,
   readOptional,
   registriesFrom,
   variantSelection,
+  variantTableRaw,
 } from './config.mjs';
 import { goProxyFrom, resolveEndpoint } from './endpoints.mjs';
 
@@ -192,8 +194,10 @@ export function resolveRelease(env = process.env, { variantsOverride, warn = () 
   const dryRun = ['1', 'true', 'yes', 'on'].includes(inputDryRun.toLowerCase());
 
   const variants = variantSelection(
-    // The fifth column of the table is what decides who owns `latest`.
-    parseVariants(readOptional(env.DOCKER_VARIANTS) || variantsOverride || undefined),
+    // The fifth column of the table is what decides who owns `latest`; the table
+    // itself comes from DOCKER_VARIANTS, else <forgejo_dir>/variants.txt, else
+    // the built-in default (the same three sources plan-matrix uses).
+    parseVariants(readOptional(env.DOCKER_VARIANTS) || variantsOverride || variantTableRaw(env)),
     inputVariants,
   );
   const registries = registriesFrom(env);
@@ -281,7 +285,13 @@ async function main() {
   );
   process.stdout.write(
     `变体：${state.variants
-      .map((variant) => `${variant.name}(${variant.dockerfile}${variant.target ? `#${variant.target}` : ''}${variant.isDefault ? ',默认' : ''})`)
+      .map((variant) => {
+        const platforms = platformsFor(variant, state.options);
+        return (
+          `${variant.name}(${variant.dockerfile}${variant.target ? `#${variant.target}` : ''}` +
+          `${variant.isDefault ? ',默认' : ''},${platforms.join('+') || '本机'})`
+        );
+      })
       .join(' ')}\n`,
   );
   process.stdout.write(

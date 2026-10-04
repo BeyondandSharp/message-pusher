@@ -332,6 +332,9 @@ export function planBuilds({ state, rules, flavor, customLabels = [], now = new 
       // Per-variant build args from the variant table (e.g. NODE_IMAGE), applied
       // by build-push.mjs on top of the globally injected ones.
       buildArgs: variant.buildArgs || [],
+      // The variant's own platform list (seventh column); empty means "use the
+      // global DOCKER_PLATFORMS", which build-push.mjs resolves.
+      platforms: variant.platforms || [],
       tagNames,
       labels,
       images: state.images.map((image) => ({

@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platformsFor, readOptional } from './config.mjs';
 import { probeDocker } from './endpoints.mjs';
 import { statePath } from './resolve.mjs';
 
@@ -41,8 +42,12 @@ export function labelArgs(labels = {}) {
   return Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
 }
 
-export function buildxCreateArgv(name) {
-  return ['buildx', 'create', '--use', '--name', name, '--driver', 'docker-container'];
+export function buildxCreateArgv(name, image = '') {
+  const argv = ['buildx', 'create', '--use', '--name', name, '--driver', 'docker-container'];
+  // An internal registry mirror can be named with DOCKER_BUILDKIT_IMAGE: the
+  // builder container is where BuildKit itself is pulled from.
+  if (readOptional(image)) argv.push('--driver-opt', `image=${readOptional(image)}`);
+  return argv;
 }
 
 export function buildxRemoveArgv(name) {
@@ -78,7 +83,11 @@ export function buildxArgv({ build, options, metadataFile, builder = '' }) {
   if (build.target) argv.push('--target', build.target);
   for (const image of build.images) for (const tag of image.tags) argv.push('--tag', tag);
   argv.push(...labelArgs(build.labels));
-  if (options.platforms.length > 0) argv.push('--platform', options.platforms.join(','));
+  // Platforms are per variant: the variant table's seventh column wins, the
+  // global DOCKER_PLATFORMS is the fallback. A single-platform build needs no
+  // docker-container builder; a multi-platform one does (see main()).
+  const platforms = platformsFor(build, options);
+  if (platforms.length > 0) argv.push('--platform', platforms.join(','));
   for (const { key, value } of effectiveBuildArgs(build, options)) argv.push('--build-arg', `${key}=${value}`);
   // Attestations are always off: they add manifest entries some registries and
   // clients still choke on, and this Action has no knob for them.
@@ -121,7 +130,7 @@ function buildOneVariant({ build, options, env, run, builder, workDir }) {
       digest = '';
     }
   }
-  return { variant: build.variant, builder: 'buildx', digest, tagNames: build.tagNames, images: build.images };
+  return { variant: build.variant, builder: 'buildx', digest, platforms: platformsFor(build, options), tagNames: build.tagNames, images: build.images };
 }
 
 async function main() {
@@ -139,18 +148,25 @@ async function main() {
   }
 
   const workDir = mkdtempSync(join(tmpdir(), 'docker-build-push-'));
-  const builder = state.options.platforms.length > 1 ? `forgejo-docker-publish-${process.pid}` : '';
+  // A docker-container builder is required as soon as ONE variant asks for more
+  // than one platform (the default builder cannot produce a manifest list).
+  const needsBuilder = state.builds.some((build) => platformsFor(build, state.options).length > 1);
+  const builder = needsBuilder ? `forgejo-docker-publish-${process.pid}` : '';
   let createdBuilder = false;
 
   try {
     if (builder) {
-      const created = runDocker(buildxCreateArgv(builder), { run: spawnSync, env });
+      const created = runDocker(buildxCreateArgv(builder, env.DOCKER_BUILDKIT_IMAGE), { run: spawnSync, env });
       if (created.status !== 0) throw new Error(`创建 buildx builder 失败（${builder}）`);
       createdBuilder = true;
     }
     for (const build of state.builds) {
       const options = state.dryRun ? { ...state.options, push: false } : state.options;
-      process.stdout.write(`==> ${build.variant}${build.isDefault ? '（默认）' : ''}：${build.dockerfile}${build.target ? `#${build.target}` : ''}\n`);
+      const platforms = platformsFor(build, options);
+      process.stdout.write(
+        `==> ${build.variant}${build.isDefault ? '（默认）' : ''}：${build.dockerfile}${build.target ? `#${build.target}` : ''}` +
+          ` platforms=${platforms.join(',') || '（本机）'}\n`,
+      );
       const result = buildOneVariant({ build, options, env, run: spawnSync, builder, workDir });
       state.results.push(result);
       writeFileSync(statePath(env), JSON.stringify(state, null, 2));

@@ -12,8 +12,9 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeDocker } from './endpoints.mjs';
-import { readOptional } from './config.mjs';
+import { platformsFor, readOptional } from './config.mjs';
 import { computeBuilds } from './meta.mjs';
+import { BINFMT_ROOT, archesOf, binfmtHandler, hostArch, normalizeArch } from './prepare.mjs';
 import { statePath } from './resolve.mjs';
 
 // Run directly (argv[1] is this file) rather than imported by a test.
@@ -30,31 +31,33 @@ export const IS_DIRECT = (() => {
 
 export const DOCKER_HELP = [
   'runner 侧检查清单：',
-  '  1) 宿主机 runner（workflow 里不写 container:）：确认 runner 用户能访问 /var/run/docker.sock；',
-  '  2) docker runner（写了 container:）：job 容器默认看不到宿主机的 socket，需要挂进去 ——',
+  '  1) 默认接法（job 容器 = docker:dind）：在 runner 配置里打开 privileged，然后**重启 runner**：',
   '       container:',
-  '         image: ${{ matrix.image }}',
-  '         options: >-',
-  '           --volume /var/run/docker.sock:/var/run/docker.sock',
-  '           --volume /usr/bin/docker:/usr/bin/docker:ro',
-  '           --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro',
-  '     并在 runner 配置里放行这些路径、然后**重启 runner**：',
-  '       runner:',
-  '         container:',
-  '           valid_volumes: ["/var/run/docker.sock", "/usr/bin/docker", "/usr/libexec/docker/cli-plugins"]',
-  '     （第 2 条同时解决 docker CLI 与 buildx：两者都必须来自挂载或镜像，Action 不再自己安装）',
-  '  3) 容器内以 root 运行（本 Action 默认如此），非 root 需要加进 docker 组；',
-  '  4) daemon 不在默认位置时，用仓库变量 DOCKER_HOST 指定（如 tcp://host:2375 或 unix:///run/user/1000/docker.sock），',
-  '     或在 runner 配置里设 container.docker_host。',
+  '         privileged: true',
+  '     dind 需要 privileged，而 workflow 里的 `options: --privileged` 会被 runner 忽略（权限只能由 runner 侧给）。',
+  '  2) daemon 由 runner 提供：设置 container.docker_host: automount，或用仓库变量 DOCKER_HOST 指向可达的 daemon；',
+  '     这两种接法都不需要 volume 挂载，也不需要 valid_volumes。',
+  '  3) job 容器里必须有 docker CLI 与 buildx：默认 docker:dind / docker:cli 自带；换镜像时 prepare 会尝试补装，',
+  '     失败时打印可用的安装方式。',
+  '  4) 只用 `docker buildx build`（没有经典构建回退）：缺 CLI / daemon / buildx 都会在构建前失败。',
 ].join('\n');
 
-/** A sharper reason than "docker version failed": socket absent vs daemon refusing. */
+/** Foreign architectures this run needs that the kernel has no QEMU handler for. */
+export function missingBinfmt(platforms = [], { arch = '', exists = existsSync, root = BINFMT_ROOT } = {}) {
+  const host = normalizeArch(arch) || normalizeArch(hostArch());
+  return archesOf(platforms).filter((candidate) => candidate !== host && !exists(join(root, binfmtHandler(candidate))));
+}
+
+/** A sharper reason than "docker version failed": no daemon at all vs one refusing. */
 export function dockerUnreachableReason(docker) {
   if (docker.socketPresent === false) {
-    return `容器内看不到 ${docker.socketPath}：socket 没有挂进 job 容器（清单第 2 条），或它不在默认路径（用 DOCKER_HOST 指定）`;
+    return (
+      `容器内看不到 ${docker.socketPath}：说明 dockerd 没有起来（prepare 会尝试启动它），` +
+      '或 daemon 不在默认路径（用 DOCKER_HOST / container.docker_host 指定）'
+    );
   }
   if (docker.socketPresent === true) {
-    return `${docker.socketPath} 存在但守护进程不可达：检查权限/守护进程状态（清单第 3 条）`;
+    return `${docker.socketPath} 存在但守护进程不可达：检查 dockerd 日志与权限（清单第 1 条）`;
   }
   return `DOCKER_HOST=${docker.host || '<unset>'} 不可达`;
 }
@@ -78,6 +81,7 @@ export function preflightChecks({
   env = process.env,
   docker = probeDocker(env),
   exists = existsSync,
+  arch = '',
   now = new Date(),
 }) {
   const errors = [];
@@ -124,6 +128,17 @@ export function preflightChecks({
     const missing = missingDockerfiles(builds, state.options.context, exists);
     if (missing.length > 0) {
       errors.push(`找不到变体的 Dockerfile：${missing.join('、')}（构建上下文 ${state.options.context}）`);
+    }
+    // A multi-architecture variant needs QEMU handlers on the host kernel.
+    // prepare registers them, but a host that already has them is normal too, so
+    // this stays a warning: the build itself would fail with "exec format error".
+    const requested = [...new Set(builds.flatMap((build) => platformsFor(build, state.options)))];
+    const foreign = missingBinfmt(requested, { arch, exists });
+    if (foreign.length > 0) {
+      warnings.push(
+        `本次构建需要 ${foreign.join('、')} 的 QEMU 处理器，但 /proc/sys/fs/binfmt_misc 里没有对应条目：` +
+          '跨架构的 RUN 步骤可能报 "exec format error"（prepare 会尝试注册；宿主已有 binfmt 时请忽略）',
+      );
     }
   }
 

@@ -8,19 +8,36 @@
 # and are never copied to a target repository.
 #
 # Usage: copy this docker-build-push/ directory into a target repository, rename
-# it to .forgejo, and the workflow runs there. It only reads the target
-# repository's Dockerfiles, build outputs and git ref.
+# it to .forgejo, and the workflow runs there. Nothing in this file names a
+# project: the variants live in `.forgejo/variants.txt` (or the DOCKER_VARIANTS
+# variable), and the workflow discovers them at run time.
 #
-# Flow: tag push -> version check -> preflight -> docker login -> tags/labels
-# -> one build per variant -> push -> digest summary.
+# Flow: tag push -> plan variants -> (per variant, in parallel) prepare the job
+# container -> version check -> preflight -> docker login -> tags/labels -> one
+# build -> push -> digest summary.
 #
-# Variants (built independently, each compiling its own artifact):
-#   alpine       -> tags suffixed -alpine
-#   trixie-slim  -> tags suffixed -trixie-slim PLUS the unsuffixed tags and `latest`
-# Every variant is one `docker buildx build` invocation against its own
-# Dockerfile; nothing is shared between variants and no variant is produced by
-# retagging another one. Each variant's row of the variant table travels with its
-# matrix entry (`spec`), so this file is the only place a variant is defined.
+# Workbench: every job container is plain `docker:dind`. The runner starts job
+# containers with `tail -f /dev/null`, so dockerd is NOT running; the `prepare`
+# step starts it inside the container. That requires the runner to allow
+# privileged job containers (runner setting `container.privileged: true`) —
+# workflow-level `options: --privileged` is ignored by the runner:
+#   runner config:
+#     container:
+#       privileged: true
+# No volume mounts and no `valid_volumes` are needed any more.
+#
+# The image lacks node, so the first step installs what the scripts need (node,
+# git, curl) with the container's own package manager; `prepare` then adds
+# buildx (normally already in the image), any `DOCKER_JOB_PACKAGES`, and the
+# QEMU binfmt handlers a multi-architecture build needs.
+#
+# Variants: `.forgejo/variants.txt` (or the repository variable DOCKER_VARIANTS)
+# holds one line per variant, in the syntax the scripts use:
+#   name|dockerfile|target|suffix|default|KEY=VALUE;…|platforms
+# The `plan` job turns that table into the publish matrix, so adding a variant is
+# one line in the table — not an edit here. Exactly one row says `true`; it owns
+# `latest` and the unsuffixed tags. Because each variant is a separate job that
+# only builds its own Dockerfile, a failed alpine job can never move `latest`.
 #
 # Repository secrets/variables (tokens may live in either place):
 #   GHCR_TOKEN            GitHub PAT with write:packages -> enables ghcr.io
@@ -29,22 +46,24 @@
 #   GHCR_IMAGE            ghcr.io/<account>/<repo>, when the GHCR namespace
 #                         differs from the Forgejo owner (it usually does)
 # Optional variables:
+#   DOCKER_VARIANTS       the variant table (wins over .forgejo/variants.txt)
 #   DOCKER_META_IMAGES, DOCKER_META_TAGS, DOCKER_META_FLAVOR, DOCKER_META_LABELS
 #   DOCKER_BUILD_ARGS, DOCKER_PLATFORMS, DOCKER_HOST, GHCR_IMAGE
+#   DOCKER_JOB_PACKAGES   extra apk/apt/dnf packages the workbench image lacks
+#   DOCKER_SKIP_BINFMT, DOCKER_BINFMT_IMAGE, DOCKER_BUILDKIT_IMAGE
 #   ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / NPM_PROXY / GOPROXY
 #   APK_REPO / YUM_REPO (explicit repositories; APK_REPO feeds the APK_PROXY arg)
 #   (see the env block below — that block is the complete, authoritative list)
 #
-# Shape: one job per variant (matrix). Each variant gets its own job container,
-# so an Alpine variant can run in an Alpine node image and a Debian one in a
-# Debian node image; they build in parallel and publish independently
-# (fail-fast: false). Adding a container is one matrix entry here, plus its
-# Dockerfile — see the README.
+# Platforms: a variant's seventh column decides its architectures (e.g.
+# `linux/amd64,linux/arm64`); DOCKER_PLATFORMS is the fallback for rows without
+# one. More than one platform makes build-push.mjs create a `docker-container`
+# builder for that run.
 #
-# Runner requirement: the job needs a `docker` CLI with the `buildx` plugin and a
-# reachable daemon. A container job gets none of that for free, so the mounts
-# below are part of the default setup; the runner must allow them in
-# `valid_volumes` and be restarted. See the README for all three setups.
+# One job per variant (matrix from the plan job). Each variant compiles its own
+# artifact against its own base image; nothing is shared between variants and no
+# variant is produced by retagging another one. `fail-fast: false` keeps the
+# variants independent: one failing must not cancel the other's publish.
 
 name: docker-publish
 
@@ -60,7 +79,7 @@ on:
         required: false
         type: string
       variants:
-        description: '可选：只构建指定变体，逗号分隔（默认全部）'
+        description: '可选：只构建指定变体，逗号分隔（默认变体表里的全部）'
         required: false
         type: string
       dry_run:
@@ -80,114 +99,37 @@ defaults:
     shell: sh
 
 jobs:
-  publish:
-    name: docker build and push (${{ matrix.variant }})
-    # One job per variant: each gets its own job container, its own build and its
-    # own push. The product is still decided by the variant's Dockerfile — the job
-    # container only decides where the scripts run, so both variants share this
-    # repository's builder image (root Dockerfile.builder: docker CLI + buildx + node).
-    #
-    # Each entry carries its variant's own row of the variant table (`spec`), in
-    # exactly the syntax DOCKER_VARIANTS uses:
-    #   name|dockerfile|target|suffix|default|KEY=VALUE;…
-    # So a variant's tags, its Dockerfile and its toolchain image all come from
-    # the matrix; adding another job container is one block here (plus the file):
-    #   - variant: bookworm
-    #     image: builder:bookworm
-    #     spec: bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
-    # `variant` is only the job name and the per-job filter — the name inside
-    # `spec` is the one that matters. Exactly one row should say `true`: that row
-    # owns `latest` and the unsuffixed tags. A row saying `false` is taken at its
-    # word, so a per-job table can never publish `latest` twice.
-    #
-    # `fail-fast: false` keeps the variants independent: one failing must not
-    # cancel the other's publish. Only the default variant (trixie by default)
-    # produces `latest` and the unsuffixed tags, so a failed alpine job can never
-    # move `latest`.
-    #
-    # The job container needs the docker CLI, the buildx plugin and node. All three
-    # come from the builder image (root Dockerfile.builder), which is exported as a
-    # tar by the `builder-image` job at the end of this file and loaded on the runner
-    # host (builder:alpine / builder:trixie-slim) — so only the daemon socket is
-    # mounted here. Load that image on the runner BEFORE tagging a release.
-    #
-    # Without that image you have two other options (see .forgejo/README.md):
-    # mount the host's docker CLI + cli-plugins as well, or use a host runner.
+  # -------------------------------------------------------------------- plan
+  # Turn the repository's variant table into the publish matrix. This is what
+  # keeps the workflow project-agnostic: no variant name, Dockerfile or platform
+  # is written down here.
+  plan:
+    name: plan variants
     runs-on: docker
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # 这里是 **job 容器（工作台）的镜像**，不是产物镜像 —— 产物由变体表和
-          # GHCR_IMAGE / DOCKER_META_IMAGES 决定，跟本字段无关。
-          # 构建镜像用本机短名 builder:<变体>，不推 registry：它由下面的 builder-image 作业
-          # （或本地 ./build-image.sh --save-builder）构建成 tar，docker load 到 runner 宿主机
-          # 之后即可用；两个 tag 指向同一个镜像。
-          - variant: alpine
-            image: builder:alpine
-            spec: alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
-          - variant: trixie-slim
-            image: builder:trixie-slim
-            spec: trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
     container:
-      image: ${{ matrix.image }}
-      # The Action never installs docker: the CLI, the buildx plugin and node come
-      # from the builder image. Only the daemon socket is mounted here, so the runner
-      # needs just this one entry in `valid_volumes` (then restart it):
-      #   runner:
-      #     container:
-      #       valid_volumes: ["/var/run/docker.sock"]
-      options: >-
-        --volume /var/run/docker.sock:/var/run/docker.sock
-    timeout-minutes: 120
-    env:
-      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
-      GHCR_IMAGE: ${{ vars.GHCR_IMAGE }}
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
-      # The variant table for THIS job comes from its matrix entry. Prefer the
-      # repository variable instead? Use `DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}`.
-      DOCKER_VARIANTS: ${{ matrix.spec }}
-      # Where the daemon lives (tcp://… or a non-default unix socket). Unset means
-      # /var/run/docker.sock, which the job container must have mounted.
-      DOCKER_HOST: ${{ vars.DOCKER_HOST }}
-      DOCKER_META_IMAGES: ${{ vars.DOCKER_META_IMAGES }}
-      DOCKER_META_TAGS: ${{ vars.DOCKER_META_TAGS }}
-      DOCKER_META_FLAVOR: ${{ vars.DOCKER_META_FLAVOR }}
-      DOCKER_META_LABELS: ${{ vars.DOCKER_META_LABELS }}
-      DOCKER_BUILD_ARGS: ${{ vars.DOCKER_BUILD_ARGS }}
-      DOCKER_PLATFORMS: ${{ vars.DOCKER_PLATFORMS }}
-      INPUT_VERSION: ${{ inputs.version }}
-      # Each job builds only its own variant (the matrix entry); a manual
-      # dispatch can still narrow it further via the `variants` input.
-      INPUT_VARIANTS: ${{ matrix.variant }}
-      INPUT_DRY_RUN: ${{ inputs.dry_run }}
-      # Endpoint variables (the same model as npm-publish).
-      #   APT_PROXY / NPM_PROXY — the value may be a real forward proxy OR an
-      #     internal MIRROR/registry: the resolve step probes it (does it serve its
-      #     own index?) and uses it accordingly — apt as a repository, npm as the
-      #     build's registry (injected as --build-arg NPM_REGISTRY), and only a
-      #     genuine proxy as a proxy.
-      #   The generic HTTP(S)_PROXY / ALL_PROXY are plain proxies for everything.
-      ALL_PROXY: ${{ vars.ALL_PROXY }}
-      HTTP_PROXY: ${{ vars.HTTP_PROXY }}
-      HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
-      NO_PROXY: ${{ vars.NO_PROXY }}
-      APT_PROXY: ${{ vars.APT_PROXY }}
-      # Explicit repositories (never probed): APK_REPO feeds the APK_PROXY build
-      # arg, YUM_REPO is passed through as `--build-arg YUM_REPO`.
-      APK_REPO: ${{ vars.APK_REPO }}
-      YUM_REPO: ${{ vars.YUM_REPO }}
-      NPM_PROXY: ${{ vars.NPM_PROXY }}
-      # Explicit package mirrors (comma separated; a bare mirror root is fine —
-      # the distro paths come from the image's os-release). Setting one skips the
-      # probe entirely. apk/yum mirrors go here, not into a *_PROXY variable; the
-      # longer *_REPOSITORY names are still accepted. There is no APK_PROXY /
-      # YUM_PROXY any more.
-      # Go module proxy: passed into the build as --build-arg GOPROXY, so a
-      # Dockerfile that declares ARG GOPROXY reaches an internal Athens.
-      GOPROXY: ${{ vars.GOPROXY }}
+      image: docker:dind
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    timeout-minutes: 15
     steps:
+      # The workbench image has docker + buildx + git, but no node, and every
+      # step below runs a node program. Install the runtime with the container's
+      # own package manager; both orchestration jobs carry this same block.
+      - name: Bootstrap job container
+        run: |
+          if ! { command -v node >/dev/null 2>&1 && command -v git >/dev/null 2>&1; }; then
+            if command -v apk >/dev/null 2>&1; then
+              apk add --no-cache nodejs npm git curl ca-certificates
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y --no-install-recommends nodejs npm git curl ca-certificates
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y nodejs npm git curl ca-certificates
+            else
+              yum install -y nodejs npm git curl ca-certificates
+            fi
+          fi
+          node --version && git --version
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -213,6 +155,131 @@ jobs:
         run: |
           dir="${{ steps.locate.outputs.forgejo_dir }}"
           node "$dir/scripts/run.mjs" verify-action
+
+      - name: Plan variant matrix
+        id: plan
+        env:
+          # The table may live in the repository variable (wins) or in
+          # .forgejo/variants.txt, which locate-action exports as
+          # DOCKER_VARIANTS_FILE for the whole job.
+          DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
+          INPUT_VARIANTS: ${{ inputs.variants }}
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" plan-matrix
+
+  # ----------------------------------------------------------------- publish
+  publish:
+    name: docker build and push (${{ matrix.variant }})
+    needs: plan
+    runs-on: docker
+    strategy:
+      fail-fast: false
+      # One job per variant, discovered by the plan job (key → array form, which
+      # is the shape a dynamic matrix supports).
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    container:
+      # The workbench. `docker:dind` ships the docker CLI, the buildx plugin and
+      # git; plain `docker:cli` works too. There is deliberately no `options:`
+      # here: the runner ignores a workflow-level --privileged, and no volume
+      # mount is needed because prepare starts its own daemon inside.
+      image: docker:dind
+    # Multi-architecture builds run foreign-arch stages under QEMU: slower than a
+    # native build, hence the headroom.
+    timeout-minutes: 180
+    env:
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
+      GHCR_IMAGE: ${{ vars.GHCR_IMAGE }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
+      # The variant table: the repository variable when set, otherwise
+      # .forgejo/variants.txt (exported by locate-action). `INPUT_VARIANTS` is the
+      # single variant this matrix job owns.
+      DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
+      INPUT_VARIANTS: ${{ matrix.variant }}
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      # Where the daemon lives (tcp://… or a non-default unix socket). Unset means
+      # the unix socket prepare's dockerd listens on. A runner-managed daemon
+      # (`container.docker_host: automount`, or DOCKER_HOST) is used as-is.
+      DOCKER_HOST: ${{ vars.DOCKER_HOST }}
+      DOCKER_META_IMAGES: ${{ vars.DOCKER_META_IMAGES }}
+      DOCKER_META_TAGS: ${{ vars.DOCKER_META_TAGS }}
+      DOCKER_META_FLAVOR: ${{ vars.DOCKER_META_FLAVOR }}
+      DOCKER_META_LABELS: ${{ vars.DOCKER_META_LABELS }}
+      DOCKER_BUILD_ARGS: ${{ vars.DOCKER_BUILD_ARGS }}
+      # Fallback platforms for variant rows without their own seventh column.
+      DOCKER_PLATFORMS: ${{ vars.DOCKER_PLATFORMS }}
+      # Extra packages for the workbench image (space/comma separated), installed
+      # by prepare with the container's package manager.
+      DOCKER_JOB_PACKAGES: ${{ vars.DOCKER_JOB_PACKAGES }}
+      # QEMU binfmt: prepare registers the handlers the requested platforms need
+      # unless DOCKER_SKIP_BINFMT is set; DOCKER_BINFMT_IMAGE overrides the image
+      # it runs (tonistiigi/binfmt) for an internal mirror.
+      DOCKER_SKIP_BINFMT: ${{ vars.DOCKER_SKIP_BINFMT }}
+      DOCKER_BINFMT_IMAGE: ${{ vars.DOCKER_BINFMT_IMAGE }}
+      # The builder container BuildKit runs in (default moby/buildkit:buildx-stable-1).
+      DOCKER_BUILDKIT_IMAGE: ${{ vars.DOCKER_BUILDKIT_IMAGE }}
+      # Endpoint variables (the same model as npm-publish).
+      #   APT_PROXY / NPM_PROXY — the value may be a real forward proxy OR an
+      #     internal MIRROR/registry: the resolve step probes it (does it serve its
+      #     own index?) and uses it accordingly — apt as a repository, npm as the
+      #     build's registry (injected as --build-arg NPM_REGISTRY), and only a
+      #     genuine proxy as a proxy.
+      #   The generic HTTP(S)_PROXY / ALL_PROXY are plain proxies for everything.
+      ALL_PROXY: ${{ vars.ALL_PROXY }}
+      HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+      HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
+      NO_PROXY: ${{ vars.NO_PROXY }}
+      APT_PROXY: ${{ vars.APT_PROXY }}
+      # Explicit repositories (never probed): APK_REPO feeds the APK_PROXY build
+      # arg, YUM_REPO is passed through as `--build-arg YUM_REPO`.
+      APK_REPO: ${{ vars.APK_REPO }}
+      YUM_REPO: ${{ vars.YUM_REPO }}
+      NPM_PROXY: ${{ vars.NPM_PROXY }}
+      # Go module proxy: passed into the build as --build-arg GOPROXY, so a
+      # Dockerfile that declares ARG GOPROXY reaches an internal Athens.
+      GOPROXY: ${{ vars.GOPROXY }}
+    steps:
+      # Same bootstrap as the plan job: node, git and curl before anything else,
+      # because `actions/checkout` and every script step need them.
+      - name: Bootstrap job container
+        run: |
+          if ! { command -v node >/dev/null 2>&1 && command -v git >/dev/null 2>&1; }; then
+            if command -v apk >/dev/null 2>&1; then
+              apk add --no-cache nodejs npm git curl ca-certificates
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y --no-install-recommends nodejs npm git curl ca-certificates
+            elif command -v dnf >/dev/null 2>&1; then
+              dnf install -y nodejs npm git curl ca-certificates
+            else
+              yum install -y nodejs npm git curl ca-certificates
+            fi
+          fi
+          node --version && git --version
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Locate action directory
+        id: locate
+        run: |
+          dir="${{ github.action_path }}"
+          [ -f "$dir/scripts/build-push.mjs" ] || dir="$GITHUB_WORKSPACE/.forgejo"
+          [ -f "$dir/scripts/build-push.mjs" ] || dir="$(dirname "$(dirname "$(find "$GITHUB_WORKSPACE" -maxdepth 6 -name build-push.mjs -path '*/scripts/*' -print -quit)")")"
+          node "$dir/scripts/run.mjs" locate-action
+
+      - name: Verify action scripts
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" verify-action
+
+      - name: Prepare build environment
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" prepare
 
       - name: Resolve version and variants
         run: |
@@ -243,47 +310,3 @@ jobs:
         run: |
           dir="${{ steps.locate.outputs.forgejo_dir }}"
           node "$dir/scripts/run.mjs" summary
-
-  # Build the builder image (root Dockerfile.builder) and export it as a tar.
-  # Manual only, and deliberately without `container:` — it runs on the runner host
-  # with the runner's own docker, so there is no chicken-and-egg between the job
-  # container and this image (and the image it builds lands on that host, which is
-  # exactly where the job containers below will look for builder:alpine / builder:trixie-slim).
-  builder-image:
-    name: build the builder image and export a tar
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: docker
-    timeout-minutes: 30
-    env:
-      BUILDER_TAGS: builder:alpine builder:trixie-slim
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Show tool versions
-        run: |
-          docker --version
-          docker buildx version
-
-      - name: Build builder image
-        run: |
-          # shellcheck disable=SC2086
-          docker build -f Dockerfile.builder $(for t in $BUILDER_TAGS; do printf -- '-t %s ' "$t"; done) .
-
-      - name: Export tar
-        run: |
-          case "$(uname -m)" in
-            x86_64|amd64) arch=amd64 ;;
-            aarch64|arm64) arch=arm64 ;;
-            *) arch="$(uname -m)" ;;
-          esac
-          mkdir -p dist
-          tar="dist/message-pusher-builder-${arch}.tar"
-          # shellcheck disable=SC2086
-          docker save -o "$tar" $BUILDER_TAGS
-          ls -lh "$tar"
-          {
-            echo "构建镜像已导出：$PWD/$tar"
-            echo "在 runner 宿主机上导入（job 容器用短名 builder:alpine / builder:trixie-slim）："
-            echo "  docker load -i $tar"
-          } >> "$GITHUB_STEP_SUMMARY"

@@ -7,6 +7,7 @@
 
 import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { platformsFor } from './config.mjs';
 import { statePath } from './resolve.mjs';
 
 // Run directly (argv[1] is this file) rather than imported by a test.
@@ -26,12 +27,20 @@ export function summaryLines(state) {
   const lines = [];
   for (const result of state.results || []) {
     const status = result.builder === 'buildx' ? 'buildx' : 'docker（降级）';
-    lines.push(`${result.variant} [${status}]${result.digest ? ` ${result.digest}` : ''}`);
+    const platforms = (result.platforms || []).join(',') || '本机';
+    lines.push(`${result.variant} [${status}] platforms=${platforms}${result.digest ? ` ${result.digest}` : ''}`);
     for (const image of result.images || []) {
       for (const tag of image.tags) lines.push(`  ${tag}`);
     }
   }
   return lines;
+}
+
+/** `alpine=linux/amd64+linux/arm64` per planned variant. */
+export function platformSummary(state) {
+  return (state.builds || state.variants || [])
+    .map((build) => `${build.variant || build.name}=${platformsFor(build, state.options || {}).join('+') || '本机'}`)
+    .join('、');
 }
 
 /** The job-summary markdown (a small table, no HTML). */
@@ -49,6 +58,7 @@ export function summaryMarkdown(state) {
     `- 仓库：${state.repo}`,
     `- tag：${state.tag}（sha ${state.sha ? state.sha.slice(0, 7) : '—'}）`,
     `- 变体：${state.variants.map((variant) => variant.name).join('、')}`,
+    `- 平台：${platformSummary(state)}`,
     `- 推送：${state.options?.push && !state.dryRun ? '是' : '否'}`,
     '',
     '| 变体 | tag | digest |',
