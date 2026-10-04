@@ -18,9 +18,11 @@
 //   summary            digest table
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readOptional } from './config.mjs';
+import { endpointsPath } from './resolve.mjs';
 import {
   MANAGER_PROXY_VARS,
   OPTIONAL_TOOLS,
@@ -35,6 +37,7 @@ import {
   primaryPackagesFor,
   probeDocker,
   proxyEnv,
+  repositoriesFor,
   resolveEndpoint,
   writeAptSources,
   writeYumRepos,
@@ -167,9 +170,10 @@ async function verifyAction(env) {
 async function ensureTools(env) {
   const { spawnSync } = await import('node:child_process');
 
-  // NPM_PROXY may be a real proxy or an internal registry; classify it once and
-  // pass the verdict on, because the build consumes it as a build argument.
-  await resolveNpmEndpoint(env);
+  // The *_PROXY values may be real proxies or internal mirrors/registries;
+  // classify them once and publish the verdicts, because the build consumes them
+  // as build arguments (see resolve.mjs).
+  await resolveEndpoints(env);
 
   const missing = missingTools(REQUIRED_TOOLS, spawnSync);
   const missingOptional = missingTools(OPTIONAL_TOOLS, spawnSync);
@@ -246,26 +250,66 @@ function exportEnv(key, value) {
   }
 }
 
+/** The raw (unexpanded) value of a variable, without a trailing slash. */
+function rawValue(env, name) {
+  return readOptional(env[name]).replace(/\/+$/, '');
+}
+
 /**
- * Decide what `NPM_PROXY` means and pass the verdict on.
- *
- * A registry mirror is handed to the build as `--build-arg NPM_REGISTRY=…`
- * (resolve.mjs adds it), which is what a Dockerfile's `ARG NPM_REGISTRY` — the
- * knob our example Dockerfiles use for `pnpm install --registry` — consumes. A
- * real proxy becomes npm's own proxy setting.
- *
- * This Action never runs npm itself (the frontend build happens inside
- * `docker build`), so the verdict is exported rather than used directly here.
+ * The apk mirror root, with the same precedence build-image.sh uses:
+ * APK_REPO → APK_REPOSITORY → APK_PROXY (compat) → the apt mirror root.
  */
-async function resolveNpmEndpoint(env) {
-  const plan = await resolveEndpoint('npm', env);
-  if (plan.source === 'proxy-as-mirror') {
-    exportEnv('NPM_REGISTRY', plan.mirror[0]);
-    process.stdout.write(`NPM_PROXY 指向的是 registry：构建将使用 --build-arg NPM_REGISTRY=${plan.mirror[0]}\n`);
-  } else if (plan.source === 'proxy') {
-    exportEnv('NPM_CONFIG_PROXY', plan.proxy);
-    process.stdout.write(`NPM_PROXY 指向的是代理：npm 将使用 ${plan.proxy}\n`);
+export function apkMirrorRoot(env, aptMirror = '') {
+  const candidates = [repositoriesFor('apk', env)[0], rawValue(env, 'APK_PROXY'), aptMirror];
+  return candidates.map((value) => String(value || '').replace(/\/+$/, '')).find((value) => value !== '') || '';
+}
+
+/**
+ * Classify the endpoint variables once and publish the verdicts for the build.
+ *
+ * A registry mirror becomes `--build-arg NPM_REGISTRY`; an apt *mirror* becomes
+ * `--build-arg APT_PROXY` (the root the Dockerfiles rewrite their sources with),
+ * and the apk mirror becomes `--build-arg APK_PROXY`. A genuine forward proxy is
+ * never injected as a repository: it reaches the build through BuildKit's
+ * HTTP(S)_PROXY forwarding instead.
+ *
+ * This Action never runs npm or apt itself inside the job (package installs
+ * happen in `docker build`), so the verdicts are written to a file the following
+ * steps read.
+ */
+async function resolveEndpoints(env) {
+  const endpoints = {};
+
+  const npm = await resolveEndpoint('npm', env);
+  if (npm.source === 'proxy-as-mirror') {
+    endpoints.npmRegistry = npm.mirror[0];
+    process.stdout.write(`NPM_PROXY 指向的是 registry：构建将使用 --build-arg NPM_REGISTRY=${npm.mirror[0]}\n`);
+  } else if (npm.source === 'proxy') {
+    exportEnv('NPM_CONFIG_PROXY', npm.proxy);
+    process.stdout.write(`NPM_PROXY 指向的是代理：npm 将使用 ${npm.proxy}\n`);
   }
+
+  const apt = await resolveEndpoint('apt-get', env);
+  const aptRoot = rawValue(env, 'APT_PROXY');
+  if ((apt.source === 'proxy-as-mirror' || apt.source === 'repository') && aptRoot) {
+    endpoints.aptMirror = aptRoot;
+    process.stdout.write(`APT_PROXY 指向的是镜像（探测到仓库索引）：构建将使用 --build-arg APT_PROXY=${aptRoot}\n`);
+  } else if (apt.source === 'proxy') {
+    process.stdout.write(`APT_PROXY 指向的是代理：构建容器通过 HTTP(S)_PROXY 走它（不注入 APT_PROXY 构建参数）\n`);
+  }
+
+  const apk = apkMirrorRoot(env, endpoints.aptMirror || '');
+  if (apk) {
+    endpoints.apkMirror = apk;
+    process.stdout.write(`apk 镜像：构建将使用 --build-arg APK_PROXY=${apk}\n`);
+  }
+
+  try {
+    writeFileSync(endpointsPath(env), JSON.stringify(endpoints, null, 2));
+  } catch (error) {
+    process.stderr.write(`[WARN] 无法写入 ${endpointsPath(env)}：${error.message}\n`);
+  }
+  return endpoints;
 }
 
 /** The command a human would run, for log messages. */

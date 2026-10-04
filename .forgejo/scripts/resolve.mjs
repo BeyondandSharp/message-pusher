@@ -29,6 +29,28 @@ export function statePath(env = process.env) {
   return join(env.RUNNER_TEMP || '/tmp', 'docker-publish.json');
 }
 
+/**
+ * Where ensure-tools records what it classified the endpoint variables as.
+ *
+ * A mirror is a *repository*, not a proxy: `APT_PROXY` pointed at an internal
+ * Debian mirror must reach a Dockerfile as a mirror root (the Dockerfiles rewrite
+ * their sources with it), while a genuine forward proxy must not. The verdict is
+ * therefore passed between steps as a file rather than guessed twice.
+ */
+export function endpointsPath(env = process.env) {
+  return join(env.RUNNER_TEMP || '/tmp', 'docker-publish.endpoints.json');
+}
+
+/** The endpoint verdicts ensure-tools published ({} when it did not run). */
+export function readEndpoints(env = process.env, readFile = readFileSync) {
+  try {
+    const parsed = JSON.parse(readFile(endpointsPath(env), 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 // Run directly (argv[1] is this file) rather than imported by a test.
 // Compare real paths: /tmp is a symlink on some hosts, and path.resolve
 // would then disagree with import.meta.url.
@@ -50,18 +72,28 @@ export const IS_DIRECT = (() => {
  *   * `GOPROXY`      — `GOPROXY` / `GO_PROXY`, so a Dockerfile's `ARG GOPROXY`
  *                      reaches an internal Athens without extra configuration;
  *   * `NPM_REGISTRY` — an explicit `NPM_REGISTRY`, or the registry `ensure-tools`
- *                      classified out of `NPM_PROXY` (it exports the verdict).
+ *                      classified out of `NPM_PROXY`;
+ *   * `APT_PROXY` / `APK_PROXY` — the mirror roots the Dockerfiles rewrite their
+ *                      package sources with (the same two build args
+ *                      build-image.sh passes). They are only filled in when
+ *                      `APT_PROXY` was *classified as a mirror*: a forward proxy
+ *                      is not a repository, and handing it to a Dockerfile that
+ *                      does `s|^https?://|<root>/|` would produce a broken
+ *                      sources list. A real proxy reaches the build through
+ *                      BuildKit's HTTP(S)_PROXY forwarding instead.
  *
  * An explicit `DOCKER_BUILD_ARGS` entry always wins, because that is the
  * repository saying what it wants. Nothing is injected when the source variable
  * is empty, so a repository that sets none of them sees exactly the same
  * command line as before.
  */
-export function withDefaultBuildArgs(options, { version, env = process.env }) {
+export function withDefaultBuildArgs(options, { version, env = process.env, endpoints = readEndpoints(env) }) {
   const candidates = [
     ['VERSION', version],
     ['GOPROXY', goProxyFrom(env)],
-    ['NPM_REGISTRY', readOptional(env.NPM_REGISTRY)],
+    ['NPM_REGISTRY', readOptional(env.NPM_REGISTRY) || readOptional(endpoints.npmRegistry)],
+    ['APT_PROXY', readOptional(endpoints.aptMirror)],
+    ['APK_PROXY', readOptional(endpoints.apkMirror)],
   ];
   const injected = candidates
     .filter(([key, value]) => value !== undefined && value !== null && String(value) !== '')

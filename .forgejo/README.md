@@ -260,8 +260,12 @@ socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网
 | `VERSION` | 本次 tag 的版本（去掉 `v` 前缀） | `DOCKER_BUILD_ARGS: VERSION=...` |
 | `GOPROXY` | 变量 `GOPROXY` 或 `GO_PROXY` | 同上 |
 | `NPM_REGISTRY` | 变量 `NPM_REGISTRY`（显式），或 `NPM_PROXY` 被判为 registry 的结果 | 同上 |
+| `APT_PROXY` | 变量 `APT_PROXY`，**仅当它被判为镜像**（此时值是镜像根地址，Dockerfile 用它改写 sources） | 同上 |
+| `APK_PROXY` | 变量 `APK_REPO` / `APK_REPOSITORY`（兼容旧名 `APK_PROXY`），没有则退回上面的 apt 镜像根 | 同上 |
 
-三个值都为空时不会注入，命令行与本功能加入前完全一致；Dockerfile 没声明对应的 `ARG` 时会被忽略。
+这些值和 `build-image.sh` 传的是同一组，所以本地构建与 CI 行为一致：Dockerfile 里 `ARG APT_PROXY` / `ARG APK_PROXY` / `ARG NPM_REGISTRY` / `ARG GOPROXY` / `ARG VERSION` 声明了哪个，就消费哪个；每个值为空时都不会注入，Dockerfile 没声明对应的 `ARG` 时会被忽略。
+
+> **判别为真代理时不会注入 `APT_PROXY`**：镜像（repository）与代理（forward proxy）不是一回事，把代理地址塞给一个会做 `s|^https?://|<root>/|` 的 Dockerfile 会生成坏掉的 sources。真正的转发代理由 BuildKit 自动带进构建容器（`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`），Dockerfile 无需任何 `ARG`。
 
 ### `DOCKER_VARIANTS` 语法
 
@@ -304,6 +308,25 @@ DOCKER_VARIANTS: |
 - GitHub 官方 runner 的镜像自带 docker CLI 与 daemon，所以官方三个 Action 不用管；Forgejo 的 `container:` 任务不是这样。
 
 因此本 Action 需要两样东西：**job 容器里能执行 `docker`**，以及**它连得上一个 daemon**。
+
+### 别把三层 image 混淆（`Start image=` 不是你的产物）
+
+一次运行里会出现三个不同层面的镜像，日志里各自出现：
+
+| 层面 | 日志里长什么样 | 由谁决定 |
+| --- | --- | --- |
+| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=node:22-bookworm` | workflow 的 `container.image`（本 Action 固定）。换它只影响脚本在哪跑，**不影响产物** |
+| ② 构建阶段：Dockerfile 里的 `FROM … AS frontend/backend` | `docker buildx build --file Dockerfile.trixie …` 过程中拉取 `node:24-trixie-slim`、`golang:1.27-trixie` 等 | 你的 Dockerfile |
+| ③ 最终产物：推送出去的镜像 | 同一条命令的 `--tag …:1.0.0-trixie` 列表 | 变体表 + Dockerfile **最后一个** `FROM` |
+
+所以看到 `Start image=node:22-bookworm` 不代表「打包用错了 Dockerfile」：它只是 job 容器。产物里是 Debian 还是 Alpine，只取决于该变体用的是哪个 Dockerfile。
+
+验证产物（不依赖日志）：
+
+```bash
+docker run --rm --entrypoint sh <镜像:tag> -c 'head -2 /etc/os-release'
+docker image inspect <镜像:tag> --format '{{.Config.Labels}}'
+```
 
 ### 三种接法（按推荐顺序）
 
@@ -382,7 +405,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 110 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 113 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
 2. `actions/checkout@v4` 在该实例是否可达。
@@ -394,7 +417,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 110 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 113 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 
