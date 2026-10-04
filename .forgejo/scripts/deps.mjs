@@ -502,6 +502,20 @@ export function packagesFor(manager, tools) {
   return names;
 }
 
+/**
+ * The preferred package per tool (the first candidate), de-duplicated — what a
+ * single batched install actually asks for. Reported in the log and printed as
+ * the manual hint, because it is the smallest command that can work.
+ */
+export function primaryPackagesFor(manager, tools) {
+  const names = [];
+  for (const tool of tools) {
+    const first = PROVIDERS[tool]?.[manager]?.[0];
+    if (first && !names.includes(first)) names.push(first);
+  }
+  return names;
+}
+
 /** `sudo` when not root. */
 export function commandPrefix(env = process.env) {
   if (typeof process.getuid === 'function' && process.getuid() === 0) return [];
@@ -571,21 +585,21 @@ export function installTools({
     });
   }
 
-  const primary = [];
-  for (const tool of tools) {
-    const first = PROVIDERS[tool]?.[manager]?.[0];
-    if (first && !primary.includes(first)) primary.push(first);
-  }
+  const primary = primaryPackagesFor(manager, tools);
   if (primary.length > 0) runInstall(primary);
 
   const stillMissing = tools.filter((tool) => !probe(tool));
   for (const tool of stillMissing) {
-    const candidates = (PROVIDERS[tool]?.[manager] || []).slice(1);
-    for (const candidate of candidates) {
-      runInstall([candidate]);
+    // The batched attempt can fail because ONE package in it does not exist in
+    // the configured mirror — apt then aborts the whole transaction, so a
+    // perfectly available package (docker.io) is lost together with a missing one
+    // (docker-buildx). Every candidate is therefore retried on its own,
+    // including the primary provider.
+    for (const candidate of PROVIDERS[tool]?.[manager] || []) {
       // Stop as soon as the binary exists: a successful install of a package
       // that happens not to provide this tool must not end the search.
       if (probe(tool)) break;
+      runInstall([candidate]);
     }
   }
 

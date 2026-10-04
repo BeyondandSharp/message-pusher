@@ -157,6 +157,18 @@ ENTRYPOINT ["/message-pusher"]
 预发布版本（含 `-`）**不会**产出 `latest`，但 `alpine` / `trixie` 浮动标签仍会更新。
 非 semver 的 tag 默认被拒绝；确实需要时设 `DOCKER_ALLOW_ANY_TAG=true`（此时 `semver` 规则不产出，`ref`/`sha`/`raw` 照常）。
 
+### runner 不展开 `${{ inputs.* }}` 时
+
+`workflow_dispatch` 的输入由 workflow 映射进环境变量（`INPUT_VERSION: ${{ inputs.version }}` 等）。Forgejo 的表达式求值器遇到**当前事件里不存在的上下文**时会**原样保留字面量**：tag 触发时没有 `inputs`，于是 `INPUT_VERSION` 的值就是字符串 `${{ inputs.version }}`，而不是空串。
+
+脚本对此有兜底，不需要你做什么：
+
+- **长得像未展开表达式的 `INPUT_*` 一律按「未填写」处理**，并在日志里打一条警告说明是哪个输入、以及最终用了什么值；
+- 真正的来源改为 `$GITHUB_EVENT_PATH` 指向的**事件载荷**（`{"inputs": {...}}`），它不依赖表达式引擎，所以分支上的 `workflow_dispatch` 即使 runner 不求值也能拿到你填的 `version` / `variants` / `dry_run`；
+- 环境变量里的**真实值仍然优先**（在会正常求值的 runner 上行为不变）。
+
+效果：tag 推送不会再被这个坑拦下（版本照旧来自 tag）；dispatch 输入也能正常生效。日志里出现 `INPUT_VERSION 是未被展开的表达式` 只是说明你的 runner 有该行为，不需要处理。
+
 **运行期才知道的值会自动作为 build arg 传入**：每次构建都带 `--build-arg VERSION=<本次版本>`，以及（配了才会带的）`GOPROXY`、`NPM_REGISTRY`。所以下面示例里的 `ARG VERSION` / `ARG GOPROXY` / `ARG NPM_REGISTRY` 直接可用，**不需要为它们写 DOCKER_BUILD_ARGS**；想自己控制就在 `DOCKER_BUILD_ARGS` 里写同名项，以你的为准。
 
 ## 配置项
@@ -283,20 +295,52 @@ DOCKER_VARIANTS: |
 
 ## runner 前置条件（重要）
 
-这个 Action 必须能访问 **Docker 守护进程**，job 容器里还要有 `node`（脚本是 `.mjs`）。两种可用接法：
+### 为什么 job 里还需要 `docker` 命令
+
+“runner 本来就能起 docker”是对的，但**能起 docker 的是 runner 进程，不是 job 容器**：
+
+- Forgejo runner 用 `docker run` 起 job 容器，它自己通过宿主机 socket 调 docker —— 这个 `docker` 二进制在**宿主机（或 runner 容器）里**；
+- 我们的脚本运行在 **job 容器内部**，那里既没有 `docker` 命令，默认也没有 `/var/run/docker.sock`；
+- GitHub 官方 runner 的镜像自带 docker CLI 与 daemon，所以官方三个 Action 不用管；Forgejo 的 `container:` 任务不是这样。
+
+因此本 Action 需要两样东西：**job 容器里能执行 `docker`**，以及**它连得上一个 daemon**。
+
+### 三种接法（按推荐顺序）
+
+**1. 把宿主机的 CLI 与 socket 一起挂进 job 容器（推荐，零安装、版本一致）**
 
 ```yaml
     runs-on: docker
     container:
       image: node:22-bookworm
-      options: --volume /var/run/docker.sock:/var/run/docker.sock   # 需要 runner 配置 valid_volumes 允许
+      options: >-
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        --volume /usr/bin/docker:/usr/bin/docker:ro
+        --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
 ```
 
-- **容器任务**：必须把 socket 挂进容器（上面 `options` 那行），并在 runner 配置里把该路径加进 `valid_volumes`；否则 `docker` 连不上 daemon。
-- **宿主机 runner**：workflow 里不写 `container:`，只要 runner 用户能访问 `/var/run/docker.sock`。
-- `docker` 命令缺失时，`ensure-tools` 会用镜像自带的包管理器尝试装 `docker.io`/`docker-cli`（走上面的代理变量）；装不上会打印需要手动执行的命令。
-- **没有 `buildx` 也能用**：自动降级为 `docker build` + `docker tag` + `docker push`（单平台、无缓存导出、无 provenance），日志里会有醒目提示。`DOCKER_PLATFORMS` 指定多平台时则必须有 buildx，否则 preflight 失败。
-- `buildx < 0.11` 不支持 `--provenance`，此时自动不传该参数。
+这三个路径都要在 runner 配置的 `valid_volumes` 里放行。第三行是 buildx 插件目录（有些发行版是 `/usr/lib/docker/cli-plugins`），不需要多平台/缓存导出时可以省略。
+
+**2. 用自带 docker CLI 的 job 镜像**
+
+例如 `docker:cli`（Alpine，带 CLI 与 buildx），再让 `ensure-tools` 补 node；或自己构建一个 node + docker CLI 的镜像。这需要把 workflow 里的 `container.image` 改成你的镜像（本 Action 刻意没有提供镜像变量）。
+
+**3. 让 Action 自己装（默认行为，最省事但依赖镜像源）**
+
+`ensure-tools` 会用镜像自带的包管理器尝试安装，走上面的代理/镜像变量：
+
+- Debian/Ubuntu：`docker.io`（Debian 主源里就有，但**同时会装上没用到的 dockerd**，体积偏大）；
+- Alpine：`docker-cli`；
+- yum/dnf：`docker` / `docker-ce-cli`。
+
+**buildx 在纯 Debian 源里不存在**（`docker-buildx` / `docker-buildx-plugin` 只在 Docker CE 仓库里），所以这条路通常只能拿到 CLI → 自动降级为单平台构建。想要 buildx 就用接法 1 或 2，或者给镜像加上 Docker CE 的 apt 源。
+
+### 其他要点
+
+- **socket 必须可达**：容器任务要挂 `/var/run/docker.sock`（如上）并在 runner 的 `valid_volumes` 里放行；宿主机 runner 则要求 runner 用户能访问该 socket。连不上时 `preflight` 会带上这份检查清单直接失败。
+- **`buildx` 缺失不是错误**：自动降级为 `docker build` + `docker tag` + `docker push`（单平台、无缓存导出、无 provenance），日志里有醒目提示；`DOCKER_PLATFORMS` 指定多平台时才会失败。降级时会带上 `DOCKER_BUILDKIT=1`，因此示例 Dockerfile 里的 `RUN --mount=type=cache` 仍然有效。
+- **`buildx < 0.11`** 不支持 `--provenance`，此时自动不传该参数。
+- **一个包缺失不会拖垮必需的包**：镜像里没有 `docker-buildx` 而只有 `docker.io` 时，批量安装会整体失败，Action 会把每个候选包单独重试，因此 `docker.io` 仍能装上（`docker` 必需、`buildx` 可选）。
 
 ## 本地校验（不需要 docker daemon / registry）
 
@@ -338,18 +382,19 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 104 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 110 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
 2. `actions/checkout@v4` 在该实例是否可达。
 3. `docker buildx version` 是否存在（没有会走降级路径，功能会少：单平台、无缓存导出）。
 4. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除）。
 5. `secrets.GHCR_TOKEN || vars.GHCR_TOKEN` 这类表达式在该实例的解析结果是否符合预期。
+6. `${{ inputs.* }}` 是否被求值：不被求值时脚本会退回事件载荷并打警告（见「runner 不展开 `${{ inputs.* }}` 时」），功能不受影响。
 
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 104 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 110 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

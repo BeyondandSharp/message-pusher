@@ -8,7 +8,7 @@
 // The state file lives in $RUNNER_TEMP (default /tmp) and deliberately contains
 // no credential: registries are recorded by token *variable name* only.
 
-import { appendFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -83,12 +83,66 @@ export function tagVersionFromRef(ref) {
 }
 
 /**
+ * A `${{ … }}` the runner never expanded.
+ *
+ * Forgejo's expression evaluator leaves a context it does not know as *literal
+ * text*: on a tag push `inputs` does not exist, so `INPUT_VERSION` arrives as the
+ * string `${{ inputs.version }}` rather than as an empty string. Reading that as
+ * "the typed version" made every tag run fail the consistency check.
+ */
+export const UNEXPANDED_EXPRESSION = /^\s*\$\{\{[^}]*\}\}\s*$/;
+
+/**
+ * The `inputs` object of the event payload, when the runner shipped one.
+ *
+ * The runner always writes the event to `$GITHUB_EVENT_PATH`, and for a
+ * workflow_dispatch that payload carries the inputs — which is a fallback that
+ * does not depend on the expression engine interpolating anything.
+ */
+export function readEventInputs(env = process.env, readFile = readFileSync) {
+  const file = readOptional(env.GITHUB_EVENT_PATH);
+  if (!file) return {};
+  try {
+    const payload = JSON.parse(readFile(file, 'utf8'));
+    return payload && typeof payload.inputs === 'object' && payload.inputs ? payload.inputs : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * One dispatch input: the environment variable first, then the event payload.
+ *
+ * An unexpanded expression is treated as "not provided" — with a warning, so a
+ * runner that cannot evaluate `inputs.*` is visible instead of silently
+ * changing the release version.
+ */
+export function dispatchInput(env, name, eventInputs = {}, { warn = () => {} } = {}) {
+  const key = `INPUT_${name}`;
+  const raw = readOptional(env[key]);
+  const fromEvent = readOptional(eventInputs[name.toLowerCase()] ?? eventInputs[name]);
+  if (raw && UNEXPANDED_EXPRESSION.test(raw)) {
+    warn(
+      `${key} 是未被展开的表达式（${raw}）：该 runner 没有对 inputs.* 求值，` +
+        (fromEvent
+          ? `已改用事件载荷里的值（${fromEvent}）`
+          : '事件载荷里也没有该输入，按未填写处理'),
+    );
+    return fromEvent;
+  }
+  return raw || fromEvent;
+}
+
+/**
  * Free-form tags are allowed only when DOCKER_ALLOW_ANY_TAG=true: the semver
  * rules then produce nothing, but `type=ref`, `type=sha` and `type=raw` still
  * work. Default is strict, because a mistyped tag is how wrong versions ship.
  */
-export function resolveRelease(env = process.env, { variantsOverride } = {}) {
-  const inputVersion = readOptional(env.INPUT_VERSION);
+export function resolveRelease(env = process.env, { variantsOverride, warn = () => {} } = {}) {
+  const eventInputs = readEventInputs(env);
+  const inputVersion = dispatchInput(env, 'VERSION', eventInputs, { warn });
+  const inputVariants = dispatchInput(env, 'VARIANTS', eventInputs, { warn });
+  const inputDryRun = dispatchInput(env, 'DRY_RUN', eventInputs, { warn });
   const refName = readOptional(env.GITHUB_REF_NAME);
   const ref = readOptional(env.GITHUB_REF);
   const isRefTag = ref.startsWith('refs/tags/');
@@ -121,14 +175,14 @@ export function resolveRelease(env = process.env, { variantsOverride } = {}) {
   const serverUrl = readOptional(env.GITHUB_SERVER_URL);
   const runNumber = readOptional(env.GITHUB_RUN_NUMBER);
   const sha = readOptional(env.GITHUB_SHA);
-  const dryRun = readOptional(env.INPUT_DRY_RUN).toLowerCase() === 'true';
+  const dryRun = ['1', 'true', 'yes', 'on'].includes(inputDryRun.toLowerCase());
 
   const variants = variantSelection(
     parseVariants(
       readOptional(env.DOCKER_VARIANTS) || variantsOverride || undefined,
       readOptional(env.DOCKER_DEFAULT_VARIANT) || DEFAULT_DEFAULT_VARIANT,
     ),
-    readOptional(env.INPUT_VARIANTS),
+    inputVariants,
   );
   const registries = registriesFrom(env);
   const images = imagesFrom(env, registries, repo.split('/').pop() || '', { preview: dryRun });

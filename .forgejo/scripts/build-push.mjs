@@ -89,6 +89,16 @@ export function buildxArgv({ build, options, metadataFile, provenanceSupported =
 }
 
 /**
+ * The environment for the classic builder. The example Dockerfiles use
+ * `RUN --mount=type=cache`, which only BuildKit understands, and every Docker
+ * Engine since 20.10 ships BuildKit — so the fallback path opts in explicitly
+ * instead of silently failing on the Dockerfile syntax.
+ */
+export function classicBuildEnv(env = process.env) {
+  return { ...env, DOCKER_BUILDKIT: '1' };
+}
+
+/**
  * `docker build` fallback: every tag but the first is attached with `docker tag`
  * afterwards, because the classic builder takes a single -t per invocation.
  */
@@ -175,7 +185,7 @@ function buildOneVariant({ build, options, env, run, buildx, provenanceSupported
     return { variant: build.variant, builder: 'buildx', digest, tagNames: build.tagNames, images: build.images };
   }
 
-  const result = runDocker(classicBuildArgv({ build, options }), { run, env });
+  const result = runDocker(classicBuildArgv({ build, options }), { run, env: classicBuildEnv(env) });
   if (result.status !== 0) throw new Error(`变体 ${build.variant} 构建失败（docker build 退出码 ${result.status}）`);
   const [first] = build.images.flatMap((image) => image.tags);
   for (const tag of extraTags(build)) {

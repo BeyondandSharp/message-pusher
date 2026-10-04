@@ -32,6 +32,7 @@ import {
   installTools,
   missingTools,
   packagesFor,
+  primaryPackagesFor,
   probeDocker,
   proxyEnv,
   resolveEndpoint,
@@ -185,6 +186,7 @@ async function ensureTools(env) {
     return 0;
   }
   const packages = packagesFor(manager, wanted);
+  const primaryPackages = primaryPackagesFor(manager, wanted);
 
   // A `*_PROXY` value may be a mirror rather than a proxy: resolveEndpoint probes
   // it once (does it serve its own repository index?) and the answer decides
@@ -204,10 +206,10 @@ async function ensureTools(env) {
   const proxyNote =
     Object.keys(proxy).length > 0 ? `（代理：${plan.proxy || Object.keys(proxy).join(', ')}）` : '（未配置代理）';
   const repoNote = repositories.length > 0 ? `（附加仓库：${repositories.join(', ')}）` : '';
-  process.stdout.write(`使用 ${manager} 安装：${packages.join(', ')} ${proxyNote}${repoNote}\n`);
+  process.stdout.write(`使用 ${manager} 安装：${primaryPackages.join(', ')} ${proxyNote}${repoNote}\n`);
 
   if (!canInstall(env)) {
-    process.stderr.write(`不是 root 且没有 sudo，跳过安装；请手动执行：${installHint(manager, packages, env, resolved)}\n`);
+    process.stderr.write(`不是 root 且没有 sudo，跳过安装；请手动执行：${installHint(manager, primaryPackages, env, resolved)}\n`);
     return 0;
   }
 
@@ -219,7 +221,7 @@ async function ensureTools(env) {
     return 0;
   }
   process.stderr.write(`docker 仍不可用（尝试过：${result.attempts.join(' | ') || '无'}）\n`);
-  process.stderr.write(`请手动执行：${installHint(manager, packages, env, resolved)}\n`);
+  process.stderr.write(`请手动执行：${installHint(manager, primaryPackages, env, resolved)}\n`);
   return 0;
 }
 
