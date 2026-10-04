@@ -36,6 +36,12 @@
 #   APK_REPO / YUM_REPO / APK_REPOSITORY / YUM_REPOSITORY / GOPROXY / GO_PROXY —
 #   see the env block below; APK_PROXY / YUM_PROXY no longer exist).
 #
+# Shape: one job per variant (matrix). Each variant gets its own job container,
+# so an Alpine variant can run in an Alpine node image and a Debian one in a
+# Debian node image; they build in parallel and publish independently
+# (fail-fast: false). Adding a container is one matrix entry here, plus the
+# variant in DOCKER_VARIANTS and its Dockerfile — see the README.
+#
 # Runner requirement: the job needs a reachable Docker daemon. A container job
 # reaches it only when the runner mounts the socket — see the README for the two
 # supported setups (`container.options` volume mount + runner `valid_volumes`,
@@ -76,12 +82,41 @@ defaults:
 
 jobs:
   publish:
-    name: docker build and push
-    # No runner-label or job-image variable on purpose: the Action works with the
-    # conventional `docker` label and the same default image as npm-publish.
+    name: docker build and push (${{ matrix.variant }})
+    # One job per variant: each gets its own job container, its own build and its
+    # own push. The product is still decided by the variant's Dockerfile — this
+    # only decides where the scripts run, so an Alpine variant can run in an
+    # Alpine node image and a Debian one in a Debian node image.
+    #
+    # Adding a container is three lines here, plus the variant itself in the
+    # repository variable DOCKER_VARIANTS and its Dockerfile:
+    #   - variant: bookworm
+    #     image: node:lts
+    # (Optional per-entry keys are yours to add, e.g. a `platforms:` field if you
+    # later make DOCKER_PLATFORMS matrix-driven.)
+    #
+    # `fail-fast: false` keeps the variants independent: one failing must not
+    # cancel the other's publish. Only the default variant (trixie by default)
+    # produces `latest` and the unsuffixed tags, so a failed alpine job can never
+    # move `latest`.
+    #
+    # Tip: mounting the host's docker CLI into every job container is cheaper
+    # than installing it in each one (Alpine needs apk, Debian needs apt):
+    #   options: >-
+    #     --volume /var/run/docker.sock:/var/run/docker.sock
+    #     --volume /usr/bin/docker:/usr/bin/docker:ro
+    #     --volume /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
     runs-on: docker
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: alpine
+            image: node:lts-alpine
+          - variant: trixie-slim
+            image: node:lts-trixie-slim
     container:
-      image: node:22-bookworm
+      image: ${{ matrix.image }}
       # A container job only reaches the daemon when the socket is mounted (and
       # the runner's valid_volumes allows it):
       # options: --volume /var/run/docker.sock:/var/run/docker.sock
@@ -111,7 +146,9 @@ jobs:
       DOCKER_ALLOW_ANY_TAG: ${{ vars.DOCKER_ALLOW_ANY_TAG }}
       SKIP_TOOL_INSTALL: ${{ vars.SKIP_TOOL_INSTALL }}
       INPUT_VERSION: ${{ inputs.version }}
-      INPUT_VARIANTS: ${{ inputs.variants }}
+      # Each job builds only its own variant (the matrix entry); a manual
+      # dispatch can still narrow it further via the `variants` input.
+      INPUT_VARIANTS: ${{ matrix.variant }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
       # Endpoint variables (the same model as npm-publish).
       #   APT_PROXY / NPM_PROXY — the value may be a real forward proxy OR an

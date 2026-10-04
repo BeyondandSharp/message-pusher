@@ -337,11 +337,11 @@ FROM ${NODE_IMAGE} AS frontend
 
 | 层面 | 日志里长什么样 | 由谁决定 |
 | --- | --- | --- |
-| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=node:22-bookworm` | workflow 的 `container.image`（本 Action 固定）。换它只影响脚本在哪跑，**不影响产物** |
+| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=node:lts-alpine`（或 `node:lts`，取决于 matrix 条目） | workflow 的 `container.image`（当前是 `${{ matrix.image }}`）。换它只影响脚本在哪跑，**不影响产物** |
 | ② 构建阶段：Dockerfile 里的 `FROM … AS frontend/backend` | `docker buildx build --file Dockerfile.trixie …` 过程中拉取 `node:24-trixie-slim`、`golang:1.27-trixie` 等 | 你的 Dockerfile |
 | ③ 最终产物：推送出去的镜像 | 同一条命令的 `--tag …:1.0.0-trixie` 列表 | 变体表 + Dockerfile **最后一个** `FROM` |
 
-所以看到 `Start image=node:22-bookworm` 不代表「打包用错了 Dockerfile」：它只是 job 容器。产物里是 Debian 还是 Alpine，只取决于该变体用的是哪个 Dockerfile。
+所以看到 `Start image=node:lts-…` 不代表「打包用错了 Dockerfile」：它只是 job 容器。产物里是 Debian 还是 Alpine，只取决于该变体用的是哪个 Dockerfile。
 
 验证产物（不依赖日志）：
 
@@ -380,33 +380,55 @@ docker image inspect <镜像:tag> --format '{{.Config.Labels}}'
 
 **buildx 在纯 Debian 源里不存在**（`docker-buildx` / `docker-buildx-plugin` 只在 Docker CE 仓库里），所以这条路通常只能拿到 CLI → 自动降级为单平台构建。想要 buildx 就用接法 1 或 2，或者给镜像加上 Docker CE 的 apt 源。
 
-### 让每个变体在"匹配的"镜像里跑（可选）
+### 一变体一 job 容器（matrix，已内置）
 
-默认是**一个 job 跑全部变体**，job 容器固定 `node:22-bookworm`。如果你希望 alpine 变体在 Alpine 的 node 里跑、Debian 变体在 Debian 的 node 里跑（例如让 `ensure-tools` 用上对应发行版的包管理器），把 job 改成 matrix：
+workflow 默认就是 matrix：**每个变体一个 job、一个自己的 job 容器**。alpine 变体在 Alpine 的 node 里跑，Debian 变体在 Debian 的 node 里跑——这样 `ensure-tools` 会走对应的包管理器，两个变体也真正并行。
 
 ```yaml
 jobs:
   publish:
+    name: docker build and push (${{ matrix.variant }})
     runs-on: docker
-    container:
-      image: ${{ matrix.image }}
     strategy:
-      fail-fast: false
+      fail-fast: false          # 一个变体失败不取消另一个（各自独立发布）
       matrix:
         include:
           - variant: alpine
             image: node:lts-alpine
-          - variant: debian
+          - variant: trixie
             image: node:lts
+    container:
+      image: ${{ matrix.image }}
     env:
       # …其余 env 不变…
-      INPUT_VARIANTS: ${{ matrix.variant }}
+      INPUT_VARIANTS: ${{ matrix.variant }}   # 每个 job 只构建自己的变体
 ```
 
-- 每个 job 只构建一个变体（`INPUT_VARIANTS` 过滤），标签不会互相覆盖：alpine job 只产 `-alpine` 系列，debian job 产无后缀 + `latest` + `-trixie`；两个 job 各自有独立的 `RUNNER_TEMP`，状态文件不冲突。
-- 代价：不再是"复制即用"的单 job 形态；`node:lts-alpine` 里没有 docker CLI，`ensure-tools` 会走 apk 安装（需要 `APK_REPO` 或网络）。
-- 若你的 runner 对 `matrix.*` 求值异常（此前见过 `inputs.*` 不求值的情况），`container.image` 会拿到字面量而拉取失败——那就把 `container.image` 写死成两个显式 job（`publish-alpine` / `publish-debian`）。
-- **这不会改变产物**：产物只由各自 Dockerfile 的 `FROM` 决定（见上文「别把三层 image 混淆」）。
+**再加一个 job 容器 = 加三行**：
+
+```yaml
+          - variant: bookworm      # ① matrix 里加一条
+            image: node:lts
+```
+
+② 在仓库变量 `DOCKER_VARIANTS` 里加同名变体（决定 Dockerfile、后缀、是否默认、以及它的 build args）：
+
+```yaml
+DOCKER_VARIANTS: |
+  alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
+  trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
+  bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
+```
+
+③ 加对应的 `Dockerfile.bookworm`。三处名字一致即可，脚本不需要改。
+
+标签归属不受影响：只有**默认变体**产无后缀标签与 `latest`，其余变体只产 `<后缀>` 系列；两个 job 各自有独立的 `RUNNER_TEMP`，状态文件不冲突。每个 job 也只需要自己那个 Dockerfile 存在（alpine job 不会因为缺少 `Dockerfile.trixie` 而失败）。
+
+注意事项：
+
+- **`container.image` 里的 `${{ matrix.image }}` 必须能被求值**。你的 runner 之前出现过 `inputs.*` 不求值的情况，所以第一次改完请先跑一次 `dry_run` 确认日志里没有把表达式原样当成镜像名（那会报拉取失败）。
+- **挂载宿主机的 docker CLI 比在每个容器里各装一次划算**（Alpine 要 `apk`、Debian 要 `apt`，而且 Debian 源里通常没有 buildx）：把上面 `container.options` 的三行挂载打开即可。
+- 想少写 YAML 也可以让 matrix 来自变量：`matrix: ${{ fromJSON(vars.DOCKER_MATRIX) }}`——但 `fromJSON` 依赖 runner 的表达式实现，先用 `dry_run` 验证；不确定时用上面的显式写法。
 
 ### 其他要点
 
