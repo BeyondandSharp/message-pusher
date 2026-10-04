@@ -142,11 +142,11 @@ sudo service nginx restart
 | `trixie-slim`（默认） | `Dockerfile.trixie-slim` | 全 Debian（`node:24-trixie-slim` / `golang:1.27-trixie`） | `debian:trixie-slim`（glibc） | 动态链接 glibc | `message-pusher:<版本>`（对应 `latest`）＋ CI 另推 `<镜像>:<版本>-trixie-slim` |
 | `alpine` | `Dockerfile.alpine` | 全 Alpine（`node:24-alpine` / `golang:1.27-alpine`） | `alpine:3.24`（musl） | musl 静态链接 | `message-pusher:<版本>-alpine` |
 
-宿主机只装了 docker、没有 buildx 时，可以让构建在仓库自带的构建环境镜像里跑（镜像由根目录 `Dockerfile.builder` 构建）：
+宿主机只装了 docker、没有 buildx 时，可以让构建在仓库自带的构建镜像里跑（根目录 `Dockerfile.builder`）：
 
 ```shell
-docker build -f Dockerfile.builder -t message-pusher-builder:1 .
-./build-image.sh --in-builder --builder-image message-pusher-builder:1
+./build-image.sh --save-builder    # 只把构建镜像导出成 dist/message-pusher-builder-<架构>.tar
+./build-image.sh --in-builder      # 自动构建构建镜像 -> 导出 tar -> 在其中构建 -> 结束后删除本机镜像
 ```
 
 两个变体的链接方式不同是有意的：alpine 侧用 musl 编译成自包含的静态二进制；trixie 侧面向 glibc 运行时，

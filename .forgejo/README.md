@@ -340,31 +340,36 @@ FROM ${NODE_IMAGE} AS frontend
 | `buildx` 插件 | 没有经典构建回退，缺它直接失败。同样由 `Dockerfile.builder` 构建的镜像提供 |
 | 可达的 Docker 守护进程 | 容器任务要挂 `/var/run/docker.sock`；或 daemon 在别处时用 `DOCKER_HOST` |
 
-### 构建与发布构建镜像
+### 构建镜像（Dockerfile.builder）
 
-CI 与本地共用的构建环境镜像在根目录 `Dockerfile.builder`（基座 `docker:cli`，装上 buildx / node / git / bash）：
+CI 的 job 容器与本地构建共用同一个构建镜像：根目录 `Dockerfile.builder`（基座 `docker:cli`，装上 buildx / node / git / bash）。它**不推 registry**，而是构建成 tar，用短名 `builder:<变体>` 在本机或 runner 上使用。
 
 ```bash
-docker build -f Dockerfile.builder -t ghcr.io/<账号>/message-pusher-builder:1 .
-docker run --rm ghcr.io/<账号>/message-pusher-builder:1 docker buildx version   # 自检
+# 本地：只产出 tar（默认 dist/message-pusher-builder-<架构>.tar）
+./build-image.sh --save-builder
+
+# 本地：自动构建 -> 导出 tar -> 在镜像内构建 -> 整体构建结束后删除本机镜像（tar 保留）
+./build-image.sh --in-builder
+KEEP_BUILDER_IMAGE=1 ./build-image.sh --in-builder    # 需要保留镜像排查时
+
+# CI：手动触发 docker-publish（workflow_dispatch）里的 builder-image 作业
+#     它跑在宿主机 runner 上（不写 container:），构建并导出 tar，把用法写进作业摘要
 ```
 
-发布二选一：
+在 runner / 目标机器上导入（job 容器用短名，所以本机必须先有该镜像）：
 
-- **手动**：`docker login ghcr.io -u <账号>` 后 `docker push` 上面那个 tag；
-- **workflow**：手动触发 `docker-publish`（`workflow_dispatch`）里的 **builder-image** 作业 —— 它跑在宿主机 runner 上（**不写 `container:`**），用 runner 自己的 docker 构建并推送，配了 Docker Hub 凭据时会一并推。
-
-**顺序很重要**：发布作业的 job 容器用的就是这个镜像，所以**先发布构建镜像，再打 tag 触发发布**，否则 job 拉不到容器镜像直接失败。
-
-**镜像引用怎么来的**：不写死命名空间，按组合拼装 ——
-
-```text
-ghcr.io/<GHCR_OWNER 或仓库 owner>/message-pusher-builder:<BUILDER_IMAGE_TAG 或 1>
+```bash
+docker load -i dist/message-pusher-builder-<架构>.tar
+docker images | grep '^builder'        # builder:alpine  builder:trixie-slim
 ```
 
-- `GHCR_OWNER`（或 `GHCR_USER`）：GHCR 命名空间与仓库 owner 不同名时用仓库变量给出，**必须全小写**（GHCR 要求仓库名小写）；不设时回落到仓库 owner。
-- `BUILDER_IMAGE_TAG`：构建镜像标签，不设即 `1`。建议用固定标签而不是 `latest`：`container.image` 由 runner 在任何步骤之前解析，固定标签能避免「改了构建镜像、CI 静默跟着变」。
-- workflow 里矩阵两行的 `image:` 与 `builder-image` 作业的 `IMAGE` 是**同一个表达式**，换命名空间或标签只需改变量，不必改 workflow。
+**顺序很重要**：矩阵里 job 容器写的是 `builder:alpine` / `builder:trixie-slim`，所以**先在这台 runner 上构建或导入该镜像，再打 tag 触发发布**，否则 job 起不来。
+
+说明：
+
+- 两个 tag 指向**同一个镜像**：job 容器的基座不影响产物，产物是 glibc 还是 musl 由各变体的 Dockerfile 决定。
+- 短名会被 Docker 当作 Docker Hub 官方命名空间（`docker.io/library/builder:alpine`），因此**只在本机已有该镜像时可用**；要跨机器分发就用上面那个 tar。
+- `--in-builder` 结束后会删除本机构建镜像（只留 tar）；`--builder-image <ref>` 可直接指定已有镜像，此时不做构建/导出/清理。
 
 ### 三种接法（按推荐顺序）
 
@@ -374,7 +379,7 @@ job 容器直接用上面那个镜像，仓库自带的 workflow 已经这么写
 
 ```yaml
     container:
-      image: ${{ matrix.image }}      # 矩阵里写死的构建镜像
+      image: ${{ matrix.image }}      # 矩阵里是 builder:alpine / builder:trixie-slim（本机镜像）
       options: >-
         --volume /var/run/docker.sock:/var/run/docker.sock
 ```
@@ -422,7 +427,7 @@ workflow 里不写 `container:`，脚本直接用宿主机的 docker —— 只�
 
 | 层面 | 日志里长什么样 | 由谁决定 |
 | --- | --- | --- |
-| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=ghcr.io/…/message-pusher-builder:1`（由矩阵条目 `image:` 决定） | workflow 的 `container.image`（当前是 `${{ matrix.image }}`，两行指向同一个构建镜像）。换它只影响脚本在哪跑，**不影响产物** |
+| ① job 容器：跑脚本的「工作台」 | runner 启动时 `🚀 Start image=builder:alpine`（或 `builder:trixie-slim`，由矩阵条目 `image:` 决定） | workflow 的 `container.image`（当前是 `${{ matrix.image }}`，两行指向同一个构建镜像）。换它只影响脚本在哪跑，**不影响产物** |
 | ② 构建阶段：Dockerfile 里的 `FROM … AS frontend/backend` | `docker buildx build --file Dockerfile.trixie-slim …` 过程中拉取 `node:24-trixie-slim`、`golang:1.27-trixie` 等 | 你的 Dockerfile |
 | ③ 最终产物：推送出去的镜像 | 同一条命令的 `--tag …:1.0.0-trixie-slim` 列表 | 变体表 + Dockerfile **最后一个** `FROM` |
 
@@ -540,7 +545,6 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 | 移除的变量 | 替代 |
 | --- | --- |
 | `GHCR_OWNER` / `GHCR_USER` | 用 `GHCR_IMAGE` 给完整镜像名（登录用户即命名空间） |
-| `BUILDER_IMAGE_TAG` | 构建环境镜像（根目录 `Dockerfile.builder`）的标签，不设即 `1`；矩阵 `image:` 与 `builder-image` 作业共用 |
 | `DOCKER_IMAGE_NAME` | 用 `DOCKER_META_IMAGES` |
 | `DOCKER_DEFAULT_VARIANT` | 在变体表第五列给一个变体写 `true` |
 | `DOCKER_CONTEXT` | 构建上下文固定为仓库根目录；Dockerfile 路径仍可带子目录 |

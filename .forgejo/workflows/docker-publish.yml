@@ -93,7 +93,7 @@ jobs:
     # So a variant's tags, its Dockerfile and its toolchain image all come from
     # the matrix; adding another job container is one block here (plus the file):
     #   - variant: bookworm
-    #     image: ghcr.io/${{ vars.GHCR_OWNER || github.repository_owner }}/message-pusher-builder:${{ vars.BUILDER_IMAGE_TAG || '1' }}
+    #     image: builder:bookworm
     #     spec: bookworm|Dockerfile.bookworm||-bookworm|false|NODE_IMAGE=node:lts
     # `variant` is only the job name and the per-job filter — the name inside
     # `spec` is the one that matters. Exactly one row should say `true`: that row
@@ -106,10 +106,10 @@ jobs:
     # move `latest`.
     #
     # The job container needs the docker CLI, the buildx plugin and node. All three
-    # come from the builder image (root Dockerfile.builder), published by the
-    # `builder-image` job at the end of this file — so only the daemon socket is
-    # mounted here. Publish that image BEFORE tagging a release, otherwise this job
-    # cannot pull its container image.
+    # come from the builder image (root Dockerfile.builder), which is exported as a
+    # tar by the `builder-image` job at the end of this file and loaded on the runner
+    # host (builder:alpine / builder:trixie-slim) — so only the daemon socket is
+    # mounted here. Load that image on the runner BEFORE tagging a release.
     #
     # Without that image you have two other options (see .forgejo/README.md):
     # mount the host's docker CLI + cli-plugins as well, or use a host runner.
@@ -118,17 +118,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 这里写的是 **job 容器（工作台）的镜像**，不是产物镜像 —— 产物镜像是
-          # buildx build --tag 推出去的那些，名字由变体表和 GHCR_IMAGE / DOCKER_META_IMAGES 决定。
-          # 构建镜像的引用按组合拼装，不写死命名空间：
-          #   ghcr.io/<GHCR_OWNER 或仓库 owner>/message-pusher-builder:<BUILDER_IMAGE_TAG 或 1>
-          # GHCR 要求仓库名全小写，若仓库 owner 含大写请显式设置小写的 GHCR_OWNER。
-          # 发布该镜像的 builder-image 作业用完全相同的表达式，因此不需要手工同步两处。
+          # 这里是 **job 容器（工作台）的镜像**，不是产物镜像 —— 产物由变体表和
+          # GHCR_IMAGE / DOCKER_META_IMAGES 决定，跟本字段无关。
+          # 构建镜像用本机短名 builder:<变体>，不推 registry：它由下面的 builder-image 作业
+          # （或本地 ./build-image.sh --save-builder）构建成 tar，docker load 到 runner 宿主机
+          # 之后即可用；两个 tag 指向同一个镜像。
           - variant: alpine
-            image: ghcr.io/${{ vars.GHCR_OWNER || github.repository_owner }}/message-pusher-builder:${{ vars.BUILDER_IMAGE_TAG || '1' }}
+            image: builder:alpine
             spec: alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
           - variant: trixie-slim
-            image: ghcr.io/${{ vars.GHCR_OWNER || github.repository_owner }}/message-pusher-builder:${{ vars.BUILDER_IMAGE_TAG || '1' }}
+            image: builder:trixie-slim
             spec: trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true|NODE_IMAGE=node:lts-trixie-slim
     container:
       image: ${{ matrix.image }}
@@ -245,27 +244,18 @@ jobs:
           dir="${{ steps.locate.outputs.forgejo_dir }}"
           node "$dir/scripts/run.mjs" summary
 
-  # Build and publish the builder image (root Dockerfile.builder) used by the
-  # publish job's container above. Manual only, and deliberately without
-  # `container:` — it runs on the runner host with the runner's own docker, so
-  # there is no chicken-and-egg between the job container and this image.
-  #
-  # The image reference below is the same expression as the matrix `image:` entries
-  # in `publish`, so the namespace/tag only has to be set once (via variables).
+  # Build the builder image (root Dockerfile.builder) and export it as a tar.
+  # Manual only, and deliberately without `container:` — it runs on the runner host
+  # with the runner's own docker, so there is no chicken-and-egg between the job
+  # container and this image (and the image it builds lands on that host, which is
+  # exactly where the job containers below will look for builder:alpine / builder:trixie-slim).
   builder-image:
-    name: build and push the builder image
+    name: build the builder image and export a tar
     if: github.event_name == 'workflow_dispatch'
     runs-on: docker
     timeout-minutes: 30
     env:
-      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
-      GHCR_OWNER: ${{ vars.GHCR_OWNER || vars.GHCR_USER || github.repository_owner }}
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
-      # 与 publish 作业矩阵里的 image 是同一个表达式：改了命名空间/标签，两处一起生效
-      IMAGE: ghcr.io/${{ vars.GHCR_OWNER || github.repository_owner }}/message-pusher-builder:${{ vars.BUILDER_IMAGE_TAG || '1' }}
-      # 仅用于 Docker Hub 那一份的标签，与上面 IMAGE 的标签保持一致
-      BUILDER_IMAGE_TAG: ${{ vars.BUILDER_IMAGE_TAG || '1' }}
+      BUILDER_TAGS: builder:alpine builder:trixie-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -276,20 +266,24 @@ jobs:
           docker buildx version
 
       - name: Build builder image
-        run: docker build -f Dockerfile.builder -t "$IMAGE" .
-
-      - name: Log in and push to GHCR
         run: |
-          [ -n "$GHCR_TOKEN" ] || { echo "缺少 GHCR_TOKEN：无法推送 $IMAGE" >&2; exit 1; }
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_OWNER" --password-stdin
-          docker push "$IMAGE"
+          # shellcheck disable=SC2086
+          docker build -f Dockerfile.builder $(for t in $BUILDER_TAGS; do printf -- '-t %s ' "$t"; done) .
 
-      - name: Push to Docker Hub (skipped when no token)
+      - name: Export tar
         run: |
-          if [ -z "$DOCKERHUB_TOKEN" ] || [ -z "$DOCKERHUB_USERNAME" ]; then
-            echo "未配置 Docker Hub 凭据，跳过。"
-            exit 0
-          fi
-          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-          docker tag "$IMAGE" "$DOCKERHUB_USERNAME/message-pusher-builder:$BUILDER_IMAGE_TAG"
-          docker push "$DOCKERHUB_USERNAME/message-pusher-builder:$BUILDER_IMAGE_TAG"
+          case "$(uname -m)" in
+            x86_64|amd64) arch=amd64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) arch="$(uname -m)" ;;
+          esac
+          mkdir -p dist
+          tar="dist/message-pusher-builder-${arch}.tar"
+          # shellcheck disable=SC2086
+          docker save -o "$tar" $BUILDER_TAGS
+          ls -lh "$tar"
+          {
+            echo "构建镜像已导出：$PWD/$tar"
+            echo "在 runner 宿主机上导入（job 容器用短名 builder:alpine / builder:trixie-slim）："
+            echo "  docker load -i $tar"
+          } >> "$GITHUB_STEP_SUMMARY"
