@@ -186,6 +186,10 @@ ENTRYPOINT ["/message-pusher"]
 
 ### Variables（构建与标签策略，全部可选）
 
+> **留空 = 未配置**：workflow 里是 `X: ${{ vars.X }}`，变量没配时导出的是**空字符串**，脚本会把空值/纯空白一律当作"没设置"并使用默认值（不会报"配置为空"）。
+
+
+
 | 名称 | 默认 | 说明 |
 | --- | --- | --- |
 | `DOCKER_IMAGE_NAME` | 仓库名 | 镜像仓库名，两个 registry 共用 |
@@ -477,7 +481,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 116 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 118 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
 2. `actions/checkout@v4` 在该实例是否可达。
@@ -489,7 +493,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 116 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 118 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

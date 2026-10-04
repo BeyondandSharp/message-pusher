@@ -13,7 +13,7 @@ import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeDocker } from './deps.mjs';
 import { readOptional } from './config.mjs';
-import { computeBuilds, DEFAULT_FLAVOR, DEFAULT_TAGS } from './meta.mjs';
+import { computeBuilds } from './meta.mjs';
 import { statePath } from './resolve.mjs';
 
 // Run directly (argv[1] is this file) rather than imported by a test.
@@ -90,8 +90,9 @@ export function preflightChecks({
   try {
     builds = computeBuilds({
       state,
-      tagsRaw: env.DOCKER_META_TAGS ?? DEFAULT_TAGS,
-      flavorRaw: env.DOCKER_META_FLAVOR ?? DEFAULT_FLAVOR,
+      // computeBuilds() turns an empty (unconfigured) value into the default.
+      tagsRaw: env.DOCKER_META_TAGS,
+      flavorRaw: env.DOCKER_META_FLAVOR,
       labelsRaw: env.DOCKER_META_LABELS,
       now,
     });

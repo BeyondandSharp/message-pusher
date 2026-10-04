@@ -361,9 +361,20 @@ export function findDuplicateTags(builds) {
 }
 
 /** The whole meta step as a pure function (used by main and by the tests). */
+/**
+ * The workflow always exports these variables (`X: ${{ vars.X }}`), so an
+ * unconfigured repository hands the programs an EMPTY STRING rather than an
+ * unset variable. Empty therefore has to mean "use the default" — `??` alone
+ * would let `''` through and fail every run of a repository that never set the
+ * variable.
+ */
+export function orDefault(raw, fallback) {
+  return raw === undefined || raw === null || String(raw).trim() === '' ? fallback : raw;
+}
+
 export function computeBuilds({ state, tagsRaw, flavorRaw, labelsRaw, now = new Date() }) {
-  const rules = parseTagRules(tagsRaw ?? DEFAULT_TAGS);
-  const flavor = parseFlavor(flavorRaw ?? DEFAULT_FLAVOR);
+  const rules = parseTagRules(orDefault(tagsRaw, DEFAULT_TAGS));
+  const flavor = parseFlavor(orDefault(flavorRaw, DEFAULT_FLAVOR));
   for (const rule of rules) {
     const generic = ['branch', 'tag', 'sha'];
     if (rule.type === 'semver') {
