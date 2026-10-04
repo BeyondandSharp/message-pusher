@@ -356,7 +356,15 @@ docker run --rm ghcr.io/<账号>/message-pusher-builder:1 docker buildx version 
 
 **顺序很重要**：发布作业的 job 容器用的就是这个镜像，所以**先发布构建镜像，再打 tag 触发发布**，否则 job 拉不到容器镜像直接失败。
 
-**换命名空间时改三处**：`docker-publish.yml` 矩阵里两行的 `image:`，以及 `builder-image` 作业里的 `IMAGE`（文件内均有注释标出）。标签建议用固定 `:1`：`container.image` 由 runner 在任何步骤之前解析，固定标签能避免「改了构建镜像、CI 静默跟着变」。
+**镜像引用怎么来的**：不写死命名空间，按组合拼装 ——
+
+```text
+ghcr.io/<GHCR_OWNER 或仓库 owner>/message-pusher-builder:<BUILDER_IMAGE_TAG 或 1>
+```
+
+- `GHCR_OWNER`（或 `GHCR_USER`）：GHCR 命名空间与仓库 owner 不同名时用仓库变量给出，**必须全小写**（GHCR 要求仓库名小写）；不设时回落到仓库 owner。
+- `BUILDER_IMAGE_TAG`：构建镜像标签，不设即 `1`。建议用固定标签而不是 `latest`：`container.image` 由 runner 在任何步骤之前解析，固定标签能避免「改了构建镜像、CI 静默跟着变」。
+- workflow 里矩阵两行的 `image:` 与 `builder-image` 作业的 `IMAGE` 是**同一个表达式**，换命名空间或标签只需改变量，不必改 workflow。
 
 ### 三种接法（按推荐顺序）
 
@@ -532,6 +540,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 | 移除的变量 | 替代 |
 | --- | --- |
 | `GHCR_OWNER` / `GHCR_USER` | 用 `GHCR_IMAGE` 给完整镜像名（登录用户即命名空间） |
+| `BUILDER_IMAGE_TAG` | 构建环境镜像（根目录 `Dockerfile.builder`）的标签，不设即 `1`；矩阵 `image:` 与 `builder-image` 作业共用 |
 | `DOCKER_IMAGE_NAME` | 用 `DOCKER_META_IMAGES` |
 | `DOCKER_DEFAULT_VARIANT` | 在变体表第五列给一个变体写 `true` |
 | `DOCKER_CONTEXT` | 构建上下文固定为仓库根目录；Dockerfile 路径仍可带子目录 |
