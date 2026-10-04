@@ -1,20 +1,23 @@
-// matrix.mjs — the dynamic matrix for the publish job.
+// matrix.mjs — the variant plan the publish job consumes.
 //
 // The shipped workflow names no variant at all: a `plan` job runs this program
-// after checkout, and its output feeds the publish job:
+// after checkout and publishes two step outputs:
+//
+//   variants=alpine,trixie-slim          the ordered list the publish job walks
+//   matrix={"variant":[...]}             the same list as a matrix, for parallel mode
+//
+// The default mode is sequential (one publish job, variants in table order)
+// because the Forgejo runner accepts but ignores `strategy.max-parallel`; the
+// matrix form is what the optional parallel mode uses:
 //
 //     strategy:
+//       fail-fast: false
 //       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 //
-// so a repository only ever edits its variant table (`.forgejo/variants.txt` or
-// the `DOCKER_VARIANTS` variable) to add, remove or rename a variant. The shape
-// written here is the plain key → array form the runner already supports for a
-// matrix that depends on another job's outputs:
-//
-//     matrix={"variant":["alpine","trixie-slim"]}
-//
-// Validation happens here as well as in `resolve`, so a typo in the table fails
-// during planning — before any job container is started for nothing.
+// Either way a repository only ever edits its variant table (`.forgejo/
+// variants.txt` or the `DOCKER_VARIANTS` variable) to add, remove or rename a
+// variant. Validation happens here as well as in `resolve`, so a typo in the
+// table fails during planning — before any job container is started for nothing.
 
 import { appendFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -55,10 +58,15 @@ async function main() {
     warn: (message) => process.stderr.write(`[WARN] ${message}\n`),
   });
   const json = JSON.stringify(matrix);
-  // One line, always: $GITHUB_OUTPUT and fromJSON() both dislike embedded newlines.
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${json}\n`);
+  const names = variants.map((variant) => variant.name).join(',');
+  // One line each: $GITHUB_OUTPUT and fromJSON() both dislike embedded newlines.
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `variants=${names}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${json}\n`);
+  }
+  process.stdout.write(`variants=${names}\n`);
   process.stdout.write(`matrix=${json}\n`);
-  process.stdout.write(`变体：${variants.map((variant) => variant.name).join(', ')}（${variants.length} 个）\n`);
+  process.stdout.write(`变体：${names}（${variants.length} 个，按表内顺序构建）\n`);
 }
 
 if (IS_DIRECT) {

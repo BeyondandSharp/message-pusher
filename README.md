@@ -146,9 +146,9 @@ sudo service nginx restart
 用动态链接（glibc 的静态链接反而要依赖运行时 `dlopen` 解析 DNS，容易出问题）。
 
 CI（`.forgejo/`）按同一套变体发布：变体定义在 `.forgejo/variants.txt`（`alpine` 与 `trixie-slim`，各含
-`linux/amd64` + `linux/arm64`），workflow 里不写任何项目名；job 容器默认 `docker:dind`，容器内缺的包
-（node/git/curl/buildx/QEMU binfmt）由 workflow 自己安装，runner 侧只需 `container.privileged: true`。
-细节见 [.forgejo/README.md](.forgejo/README.md)。
+`linux/amd64` + `linux/arm64`），按表内顺序**逐个变体**构建；workflow 里不写任何项目名，job 容器默认
+`docker:dind`，容器内缺的包（node/git/curl/buildx/QEMU binfmt）由 workflow 自己安装，
+runner 侧只需 `container.privileged: true`。细节见 [.forgejo/README.md](.forgejo/README.md)。
 
 脚本选项：
 

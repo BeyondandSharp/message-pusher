@@ -7,9 +7,9 @@ Forgejo Action：**推送 tag 即构建并推送容器镜像**，发布到 **ghc
 ```
 push tag v1.2.3
       │
-      ├─ plan 作业：变体表 → 发布矩阵（fromJSON(needs.plan.outputs.matrix)）   plan-matrix
+      ├─ plan 作业：校验变体表 → 顺序变体列表（同时给出矩阵，供可选并行模式）   plan-matrix
       │
-      └─ 每个变体一个 job（并行、fail-fast: false；job 容器 = docker:dind）
+      └─ 一个 publish job（job 容器 = docker:dind），按表内顺序逐个变体：
             ├─ 容器内装运行环境（node/git/curl）                    Bootstrap（内联 sh）
             ├─ 解析版本与变体                                       resolve
             ├─ 容器内准备构建环境（dockerd / buildx / 额外包 / binfmt） prepare
@@ -45,7 +45,7 @@ cp -r docker-build-push /path/to/target-repo/.forgejo
     ├── endpoints.mjs         # 端点判别（镜像 vs 代理）+ docker/buildx 能力探测
     ├── locate-action.mjs     # 找 Action 目录，并导出变体表路径
     ├── config.mjs            # 变体表/仓库变量 → 归一化配置
-    ├── matrix.mjs            # 变体表 → 发布矩阵（plan 作业）
+    ├── matrix.mjs            # 变体表 → 顺序列表 + 矩阵（plan 作业）
     ├── prepare.mjs           # 容器内准备：dockerd / buildx / 额外包 / QEMU binfmt
     ├── resolve.mjs           # tag → 版本、变体、状态文件
     ├── preflight.mjs         # 预检（凭据、Dockerfile、tag 冲突、daemon）
@@ -178,7 +178,7 @@ trixie-slim|Dockerfile.trixie-slim||-trixie-slim|true||linux/amd64,linux/arm64
 2. `.forgejo/variants.txt`（`locate-action` 会把它的路径导出给后续步骤；不存在就用下一条）；
 3. 内置默认表（alpine + trixie-slim，双架构）。
 
-> 内置的 workflow 不再在 matrix 里写字面变体：`plan` 作业把变体表变成发布矩阵（`matrix={"variant":[…]}`），发布作业用 `fromJSON(needs.plan.outputs.matrix)` 展开。所以**改变体只改变体表，不碰 workflow**。
+> 内置的 workflow 不在 YAML 里写字面变体：`plan` 作业校验变体表并输出**有序变体列表**（`variants=alpine,trixie-slim`），发布作业按这个顺序**逐个变体**构建。所以**改变体只改变体表，不碰 workflow**。
 
 **第五列（是否默认）是唯一决定 `latest` 归属的地方**：整个表里必须**恰好一个** `true`；一个都没有（且有多个变体）会直接报错，只有一个变体时它天然是默认。写 `false` 的行是「明确不要 latest」，不会被单变体回退悄悄变成默认，因此两个 job 绝不会同时推 `latest`。
 
@@ -208,7 +208,7 @@ FROM ${NODE_IMAGE} AS frontend
 | 触发 | 说明 |
 | --- | --- |
 | 推送 tag `v1.2.3` / `1.2.3` | 主路径，版本 = tag（允许 `v` 前缀，允许 `1.2.3-rc.1` 预发布） |
-| 手工 `workflow_dispatch` | 在**分支**上运行时必须填 `version`（它就是本次发布的版本）；在 **tag ref** 上运行时 `version` 必须与之一致；`variants` 只构建指定变体（在 plan 阶段过滤矩阵）；`dry_run` 只验证构建（不登录、不推送） |
+| 手工 `workflow_dispatch` | 在**分支**上运行时必须填 `version`（它就是本次发布的版本）；在 **tag ref** 上运行时 `version` 必须与之一致；`variants` 只构建指定变体（在 plan 阶段过滤）；`dry_run` 只验证构建（不登录、不推送） |
 
 预发布版本（含 `-`）**不会**产出 `latest`，但 `alpine` / `trixie-slim` 浮动标签仍会更新。
 非 semver 的 tag 一律被拒绝（没有开关）：版本号必须形如 `v1.2.3` 或 `1.2.3-rc.1`。
@@ -313,33 +313,32 @@ runner 没有直连外网时，先分清三件不同的事：**代理**（forwar
 | `alpine` | `v1.2.3-alpine`、`1.2.3-alpine`、`1.2-alpine`、`sha-abc1234-alpine`、`alpine` |
 | `trixie-slim`（默认） | 上面一套（换成 `-trixie-slim`）**＋** 无后缀：`v1.2.3`、`1.2.3`、`1.2`、`sha-abc1234`、`latest` |
 
-## 动态矩阵与 runner 版本
+## 顺序构建与可选并行模式
 
-`publish` 作业的矩阵来自 `plan` 作业的输出：
+默认是**顺序构建**：`plan` 作业输出有序变体列表（`variants=alpine,trixie-slim`），`publish` 作业按表内顺序逐个变体执行 `resolve → preflight → login → meta → build-push`，`build-push` 一个变体一个变体地调用 `docker buildx build`。
+
+为什么不用 matrix 并行：
+
+- `strategy.max-parallel` 在 Forgejo 里**会被接受但不生效**（[runner#1540](https://code.forgejo.org/forgejo/runner/issues/1540)），matrix 无法限流；
+- 顺序执行让两个变体共用同一个 job 容器里的 dockerd 与 buildx builder，也避免两份 QEMU 跨架构构建抢同一台机器的 CPU；
+- **第一个失败的变体会中止后续变体**：一次失败的发布不会把 `latest` 移到不完整的产物上，修好后重推 tag 即可。
+
+一个 job 覆盖全部变体，所以 `timeout-minutes: 180` 是全部变体的总预算，外层还有 runner 的 `runner.timeout`（默认 3h）；两个变体加起来超过它的话两处都要调大。
+
+**想换回并行**（变体互相独立、一个失败不取消另一个）时改三行即可——`plan` 作业已经同时输出了矩阵形式：
 
 ```yaml
-  plan:
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
   publish:
     needs: plan
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    ...
+    env:
+      INPUT_VARIANTS: ${{ matrix.variant }}      # 原来是 needs.plan.outputs.variants
 ```
 
-这需要 runner + Forgejo 支持「`strategy.matrix` 引用 `needs.*.outputs`」（上游 runner PR #1190 / Forgejo PR #10244，2025-11 合入）。
-
-**旧实例回退**：如果日志里矩阵求值失败，把 `publish` 的 `strategy` 换成内联变体名即可（变体表仍然生效，`resolve` 会从中挑出本 job 的那个）：
-
-```yaml
-    strategy:
-      fail-fast: false
-      matrix:
-        variant:
-          - alpine
-          - trixie-slim
-```
+这需要 runner + Forgejo 支持「`strategy.matrix` 引用 `needs.*.outputs`」（上游 runner PR #1190 / Forgejo PR #10244，2025-11 合入）。旧实例上就别切并行。
 
 ## runner 前置条件（重要）
 
@@ -412,7 +411,7 @@ docker run --rm --entrypoint sh <镜像:tag> -c 'head -2 /etc/os-release'
 cp -r docker-build-push /tmp/fixture/.forgejo
 GITHUB_WORKSPACE=/tmp/fixture node /tmp/fixture/.forgejo/scripts/run.mjs locate-action
 
-# 变体表 → 发布矩阵（完全不碰 docker）：
+# 变体表 → 顺序列表 + 矩阵（完全不碰 docker）：
 GITHUB_WORKSPACE=/tmp/fixture DOCKER_VARIANTS_FILE=/tmp/fixture/.forgejo/variants.txt \
   node /tmp/fixture/.forgejo/scripts/run.mjs plan-matrix
 
@@ -435,8 +434,8 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 - **digest / 平台**：用 `--metadata-file` 读 `containerimage.digest`；汇总（日志与 `$GITHUB_STEP_SUMMARY`）会列出每个变体的平台与 digest。
 - **label**：`created/revision/version/source/url/title` 由脚本生成，`DOCKER_META_LABELS` 可覆盖。
 - **dry run**：`--output type=cacheonly`，不登录、不推送、不写 image store；没有任何凭据也能跑（会用 `ghcr.io/<owner>/<仓库>` 作为预览镜像名）。仍然需要 docker CLI + daemon + buildx。
+- **顺序**：一个 publish job 按变体表顺序逐个构建；第一个失败的变体会中止后续变体，因此一次失败的发布不会把 `latest` 移到不完整的产物上，修好后重推 tag 即可。`latest` 只属于默认变体。
 - **多 registry**：一次构建同时打上两个 registry 的标签，一次 push 推到两边；两个 registry 各登录一次。
-- **并行**：每个变体一个 job 容器，互相独立；一个变体失败不影响另一个（`fail-fast: false`），`latest` 只属于默认变体。
 
 ## 已知限制
 
@@ -449,6 +448,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 - `secrets.X || vars.X` 依赖 Forgejo 的表达式实现；若你使用的版本不支持，把 token 直接放 Secrets 并改成 `${{ secrets.X }}` 即可。
 - 依赖 `actions/checkout@v4`（Forgejo 默认 actions registry）。若实例无法访问，改成全限定 URL `https://code.forgejo.org/actions/checkout@v4`。
 - 多架构构建在 QEMU 下明显慢于本机构建；一个变体的产物不能复用给另一个变体（**这是设计目标**）。
+- 变体默认**顺序**构建：第一个失败会中止后续变体（见「顺序构建与可选并行模式」）；`strategy.max-parallel` 在 Forgejo 里不生效，并行要靠 matrix + needs 动态矩阵。
 
 ### 已移除的变量与替代做法
 
@@ -471,13 +471,13 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 
 本目录的代码在源仓库经过了 125 个用例的单元测试与假 docker 端到端，但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
-1. runner 是否支持 `strategy.matrix` 引用 `needs.*.outputs`（见「动态矩阵」；不支持就用回退片段）。
-2. runner 是否打开了 `container.privileged: true` 并重启过：日志里 `prepare` 应打印 `docker=…（本次启动）`，否则会带着 runner 侧清单失败。
-3. `actions/checkout@v4` 在该实例是否可达（Bootstrap 已装好 node/git）。
-4. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除）。
-5. `secrets.GHCR_TOKEN || vars.GHCR_TOKEN` 这类表达式在该实例的解析结果是否符合预期。
-6. `${{ inputs.* }}` 是否被求值：不被求值时脚本会退回事件载荷并打警告，功能不受影响。
-7. 多架构：首次跑看 `prepare` 的 `binfmt=` 一栏；`missing:arm64` 说明宿主机没有 QEMU 处理器，需要宿主安装 qemu-user-static 或让 job 容器保持 privileged。
+1. runner 是否打开了 `container.privileged: true` 并重启过：日志里 `prepare` 应打印 `docker=…（本次启动）`，否则会带着 runner 侧清单失败。
+2. `actions/checkout@v4` 在该实例是否可达（Bootstrap 已装好 node/git）。
+3. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除）。
+4. `secrets.GHCR_TOKEN || vars.GHCR_TOKEN` 这类表达式在该实例的解析结果是否符合预期。
+5. `${{ inputs.* }}` 是否被求值：不被求值时脚本会退回事件载荷并打警告，功能不受影响。
+6. 多架构：首次跑看 `prepare` 的 `binfmt=` 一栏；`missing:arm64` 说明宿主机没有 QEMU 处理器，需要宿主安装 qemu-user-static 或让 job 容器保持 privileged。
+7. 顺序构建的总耗时是否在 `timeout-minutes: 180` 与 runner 的 `runner.timeout`（默认 3h）之内。
 
 ## 测试
 

@@ -12,9 +12,10 @@
 # project: the variants live in `.forgejo/variants.txt` (or the DOCKER_VARIANTS
 # variable), and the workflow discovers them at run time.
 #
-# Flow: tag push -> plan variants -> (per variant, in parallel) prepare the job
+# Flow: tag push -> plan variants (validate the table, apply the dispatch filter)
+# -> ONE publish job that walks the variants in table order: prepare the job
 # container -> version check -> preflight -> docker login -> tags/labels -> one
-# build -> push -> digest summary.
+# build per variant -> push -> digest summary.
 #
 # Workbench: every job container is plain `docker:dind`. The runner starts job
 # containers with `tail -f /dev/null`, so dockerd is NOT running; the `prepare`
@@ -34,10 +35,11 @@
 # Variants: `.forgejo/variants.txt` (or the repository variable DOCKER_VARIANTS)
 # holds one line per variant, in the syntax the scripts use:
 #   name|dockerfile|target|suffix|default|KEY=VALUE;…|platforms
-# The `plan` job turns that table into the publish matrix, so adding a variant is
-# one line in the table — not an edit here. Exactly one row says `true`; it owns
-# `latest` and the unsuffixed tags. Because each variant is a separate job that
-# only builds its own Dockerfile, a failed alpine job can never move `latest`.
+# The `plan` job validates that table and turns it into the ordered variant list
+# the publish job walks, so adding a variant is one line in the table — not an
+# edit here. Exactly one row says `true`; it owns `latest` and the unsuffixed
+# tags, and because each variant is its own `buildx build` of its own Dockerfile,
+# no variant is ever produced by retagging another one.
 #
 # Repository secrets/variables (tokens may live in either place):
 #   GHCR_TOKEN            GitHub PAT with write:packages -> enables ghcr.io
@@ -60,10 +62,14 @@
 # one. More than one platform makes build-push.mjs create a `docker-container`
 # builder for that run.
 #
-# One job per variant (matrix from the plan job). Each variant compiles its own
-# artifact against its own base image; nothing is shared between variants and no
-# variant is produced by retagging another one. `fail-fast: false` keeps the
-# variants independent: one failing must not cancel the other's publish.
+# Variants build sequentially, in table order, inside one publish job.
+# `strategy.max-parallel` is accepted but ignored by the Forgejo runner (runner
+# issue #1540), so a matrix cannot be rate-limited; one job walking the table
+# gives a deterministic order, a single dockerd + buildx builder, and no two QEMU
+# builds competing for the same CPU. The first failing variant stops the run, so
+# a failed non-default variant never moves `latest`; fix it and push the tag
+# again. To go back to parallel, mutually independent variants, see the 并行模式
+# snippet in .forgejo/README.md — the plan job already publishes the matrix form.
 
 name: docker-publish
 
@@ -100,15 +106,20 @@ defaults:
 
 jobs:
   # -------------------------------------------------------------------- plan
-  # Turn the repository's variant table into the publish matrix. This is what
-  # keeps the workflow project-agnostic: no variant name, Dockerfile or platform
-  # is written down here.
+  # Validate the repository's variant table and turn it into the ordered list the
+  # publish job walks (it also publishes the matrix form for the optional parallel
+  # mode documented in .forgejo/README.md). This is what keeps the workflow
+  # project-agnostic: no variant name, Dockerfile or platform is written here.
   plan:
     name: plan variants
     runs-on: docker
     container:
       image: docker:dind
     outputs:
+      # What the sequential publish job builds, in table order.
+      variants: ${{ steps.plan.outputs.variants }}
+      # Unused by the default mode; here so the parallel mode is a one-line change:
+      #   matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       matrix: ${{ steps.plan.outputs.matrix }}
     timeout-minutes: 15
     steps:
@@ -170,22 +181,18 @@ jobs:
 
   # ----------------------------------------------------------------- publish
   publish:
-    name: docker build and push (${{ matrix.variant }})
+    name: docker build and push（按变体表顺序）
     needs: plan
     runs-on: docker
-    strategy:
-      fail-fast: false
-      # One job per variant, discovered by the plan job (key → array form, which
-      # is the shape a dynamic matrix supports).
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     container:
       # The workbench. `docker:dind` ships the docker CLI, the buildx plugin and
       # git; plain `docker:cli` works too. There is deliberately no `options:`
       # here: the runner ignores a workflow-level --privileged, and no volume
       # mount is needed because prepare starts its own daemon inside.
       image: docker:dind
-    # Multi-architecture builds run foreign-arch stages under QEMU: slower than a
-    # native build, hence the headroom.
+    # One job now covers every variant, so the budget spans all of them (each is
+    # still amd64 + arm64, and the foreign-arch stages run under QEMU). The
+    # runner's own `runner.timeout` (default 3h) stays the outer limit.
     timeout-minutes: 180
     env:
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
@@ -194,9 +201,10 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
       # The variant table: the repository variable when set, otherwise
       # .forgejo/variants.txt (exported by locate-action). `INPUT_VARIANTS` is the
-      # single variant this matrix job owns.
+      # ordered list the plan job selected (all variants unless the dispatch input
+      # narrowed it); resolve/build-push then walk it one variant at a time.
       DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
-      INPUT_VARIANTS: ${{ matrix.variant }}
+      INPUT_VARIANTS: ${{ needs.plan.outputs.variants }}
       INPUT_VERSION: ${{ inputs.version }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
       # Where the daemon lives (tcp://… or a non-default unix socket). Unset means
