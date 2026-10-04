@@ -10,7 +10,7 @@
 # 用法见同目录的 build-image.sh（--variant trixie）。
 
 # ---------------------------------------------------------------- 前端（Debian）
-FROM node:24-trixie-slim AS frontend
+FROM node:lts-trixie-slim AS frontend
 
 ARG VERSION=dev
 ARG NPM_REGISTRY=""

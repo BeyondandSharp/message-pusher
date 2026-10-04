@@ -329,6 +329,9 @@ export function planBuilds({ state, rules, flavor, customLabels = [], now = new 
       dockerfile: variant.dockerfile,
       target: variant.target,
       isDefault: variant.isDefault,
+      // Per-variant build args from the variant table (e.g. NODE_IMAGE), applied
+      // by build-push.mjs on top of the globally injected ones.
+      buildArgs: variant.buildArgs || [],
       tagNames,
       labels,
       images: state.images.map((image) => ({

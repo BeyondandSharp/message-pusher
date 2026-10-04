@@ -70,22 +70,49 @@ export function parseKeyValues(raw, what = 'KEY=VALUE') {
 const VARIANT_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 
 /**
+ * The per-variant build arguments of the sixth column: `KEY=VALUE`, several
+ * separated by `;`.
+ *
+ * This is how a repository tells the Action which toolchain image a variant is
+ * built with — the Dockerfile declares `ARG NODE_IMAGE` and does
+ * `FROM ${NODE_IMAGE}`, and the value travels with the variant:
+ *
+ *   alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine
+ *   trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
+ */
+export function parseVariantBuildArgs(raw) {
+  return String(raw ?? '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
+    .map((item) => {
+      const index = item.indexOf('=');
+      if (index <= 0) throw new Error(`变体的构建参数需要 KEY=VALUE 形式（多条用 ; 分隔），收到：${item}`);
+      return { key: item.slice(0, index).trim(), value: item.slice(index + 1) };
+    });
+}
+
+/**
  * Parse the variant table.
  *
- *   <name>|<dockerfile>|<target>|<suffix>|<is-default>
+ *   <name>|<dockerfile>|<target>|<suffix>|<is-default>|<KEY=VALUE;…>
  *
  * Only the name is required; the rest defaults to `Dockerfile.<name>`, no
- * target, `-<name>` suffix, and "not the default variant". The literal suffix
- * `none` means "no suffix at all" (useful when DOCKER_META_TAGS already
- * distinguishes variants). DOCKER_DEFAULT_VARIANT wins over the fifth field.
+ * target, `-<name>` suffix, "not the default variant" and no extra build args.
+ * The literal suffix `none` means "no suffix at all" (useful when
+ * DOCKER_META_TAGS already distinguishes variants). DOCKER_DEFAULT_VARIANT wins
+ * over the fifth field.
  */
 export function parseVariants(raw = DEFAULT_VARIANTS, defaultVariant = DEFAULT_DEFAULT_VARIANT) {
-  const lines = splitList(raw);
+  // One variant per line: the sixth column may itself contain `;` (build-arg
+  // separator) and `,` (inside values like `GOPROXY=http://a,direct`), so this
+  // list must not be split on those.
+  const lines = splitLines(raw);
   if (lines.length === 0) throw new Error('DOCKER_VARIANTS 为空：至少要有一个变体');
   const variants = [];
   const seen = new Set();
   for (const line of lines) {
-    const [name = '', dockerfile = '', target = '', suffix, flag = ''] = line.split('|').map((part) => part.trim());
+    const [name = '', dockerfile = '', target = '', suffix, flag = '', argsRaw = ''] = line.split('|').map((part) => part.trim());
     if (!VARIANT_NAME.test(name)) {
       throw new Error(`变体名非法：${name || '<empty>'}（只允许小写字母/数字/._-，且以字母或数字开头）`);
     }
@@ -97,6 +124,7 @@ export function parseVariants(raw = DEFAULT_VARIANTS, defaultVariant = DEFAULT_D
       target,
       suffix: suffix === undefined || suffix === '' ? `-${name}` : suffix === 'none' ? '' : suffix,
       isDefault: flag === 'true',
+      buildArgs: parseVariantBuildArgs(argsRaw),
     });
   }
   const wanted = readOptional(defaultVariant) || DEFAULT_DEFAULT_VARIANT;

@@ -262,6 +262,7 @@ socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网
 | `NPM_REGISTRY` | 变量 `NPM_REGISTRY`（显式），或 `NPM_PROXY` 被判为 registry 的结果 | 同上 |
 | `APT_PROXY` | 变量 `APT_PROXY`，**仅当它被判为镜像**（此时值是镜像根地址，Dockerfile 用它改写 sources） | 同上 |
 | `APK_PROXY` | 变量 `APK_REPO` / `APK_REPOSITORY`（兼容旧名 `APK_PROXY`），没有则退回上面的 apt 镜像根 | 同上 |
+| 变体自己的参数 | `DOCKER_VARIANTS` 第六列，例如 `NODE_IMAGE=node:lts-alpine` | `DOCKER_BUILD_ARGS` 里写同名项 |
 
 这些值和 `build-image.sh` 传的是同一组，所以本地构建与 CI 行为一致：Dockerfile 里 `ARG APT_PROXY` / `ARG APK_PROXY` / `ARG NPM_REGISTRY` / `ARG GOPROXY` / `ARG VERSION` 声明了哪个，就消费哪个；每个值为空时都不会注入，Dockerfile 没声明对应的 `ARG` 时会被忽略。
 
@@ -269,17 +270,38 @@ socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网
 
 ### `DOCKER_VARIANTS` 语法
 
+**每行一个变体**（不能用逗号分隔：第六列里可能有 `;` 和 `,`）：
+
 ```
-<名字>|<Dockerfile>|<target>|<后缀>|<是否默认>
+<名字>|<Dockerfile>|<target>|<后缀>|<是否默认>|<KEY=VALUE;KEY=VALUE>
 ```
 
-只有名字必需；其余默认 `Dockerfile.<名字>`、无 target、`-<名字>`、非默认。后缀写 `none` 表示**不加后缀**。缺省值等价于：
+只有名字必需；其余默认 `Dockerfile.<名字>`、无 target、`-<名字>`、非默认、无额外构建参数。后缀写 `none` 表示**不加后缀**。缺省值等价于：
 
 ```
 DOCKER_VARIANTS: |
   alpine|Dockerfile.alpine
   trixie|Dockerfile.trixie
 ```
+
+**第六列是每个变体自己的 build args**，这就是"让仓库指定工具链镜像"的通用做法——Dockerfile 里声明 `ARG`，值随变体走，不需要改 workflow、也不需要为每个变体单独写 job：
+
+```yaml
+DOCKER_VARIANTS: |
+  alpine|Dockerfile.alpine||-alpine|false|NODE_IMAGE=node:lts-alpine;GO_IMAGE=golang:1.27-alpine
+  trixie|Dockerfile.trixie||-trixie|true|NODE_IMAGE=node:lts
+```
+
+对应 Dockerfile（`ARG` 必须在**第一个 `FROM` 之前**声明才能用于 `FROM`）：
+
+```dockerfile
+ARG NODE_IMAGE=node:24-alpine
+FROM ${NODE_IMAGE} AS frontend
+```
+
+于是 alpine 变体的前端用 `node:lts-alpine`、trixie 变体用 `node:lts`，各自独立构建；换版本只改仓库变量，两个 Dockerfile 都不用动。任何 `KEY=VALUE` 都行（Go 工具链镜像、构建标记、`GOFLAGS`…），不限于 node。
+
+优先级：**`DOCKER_BUILD_ARGS` > 变体第六列 > 自动注入**（同一 key 冲突时）。
 
 每个变体**恰好一次** `docker build` 调用，各自 `--file`/`--target`，**不会**用「编译一次、复制进两个 runtime stage」或「打一个 tag 再 retag」的做法；同一镜像上出现重复 tag 会被 preflight 直接拒绝。
 
@@ -358,6 +380,34 @@ docker image inspect <镜像:tag> --format '{{.Config.Labels}}'
 
 **buildx 在纯 Debian 源里不存在**（`docker-buildx` / `docker-buildx-plugin` 只在 Docker CE 仓库里），所以这条路通常只能拿到 CLI → 自动降级为单平台构建。想要 buildx 就用接法 1 或 2，或者给镜像加上 Docker CE 的 apt 源。
 
+### 让每个变体在"匹配的"镜像里跑（可选）
+
+默认是**一个 job 跑全部变体**，job 容器固定 `node:22-bookworm`。如果你希望 alpine 变体在 Alpine 的 node 里跑、Debian 变体在 Debian 的 node 里跑（例如让 `ensure-tools` 用上对应发行版的包管理器），把 job 改成 matrix：
+
+```yaml
+jobs:
+  publish:
+    runs-on: docker
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: alpine
+            image: node:lts-alpine
+          - variant: debian
+            image: node:lts
+    env:
+      # …其余 env 不变…
+      INPUT_VARIANTS: ${{ matrix.variant }}
+```
+
+- 每个 job 只构建一个变体（`INPUT_VARIANTS` 过滤），标签不会互相覆盖：alpine job 只产 `-alpine` 系列，debian job 产无后缀 + `latest` + `-trixie`；两个 job 各自有独立的 `RUNNER_TEMP`，状态文件不冲突。
+- 代价：不再是"复制即用"的单 job 形态；`node:lts-alpine` 里没有 docker CLI，`ensure-tools` 会走 apk 安装（需要 `APK_REPO` 或网络）。
+- 若你的 runner 对 `matrix.*` 求值异常（此前见过 `inputs.*` 不求值的情况），`container.image` 会拿到字面量而拉取失败——那就把 `container.image` 写死成两个显式 job（`publish-alpine` / `publish-debian`）。
+- **这不会改变产物**：产物只由各自 Dockerfile 的 `FROM` 决定（见上文「别把三层 image 混淆」）。
+
 ### 其他要点
 
 - **socket 必须可达**：容器任务要挂 `/var/run/docker.sock`（如上）并在 runner 的 `valid_volumes` 里放行；宿主机 runner 则要求 runner 用户能访问该 socket。连不上时 `preflight` 会带上这份检查清单直接失败。
@@ -405,7 +455,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 113 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 116 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
 2. `actions/checkout@v4` 在该实例是否可达。
@@ -417,7 +467,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 113 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 116 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

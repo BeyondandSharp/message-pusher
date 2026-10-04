@@ -61,6 +61,21 @@ export function buildxRemoveArgv(name) {
 }
 
 /**
+ * The build args of one variant: the per-variant ones from the variant table
+ * (e.g. `NODE_IMAGE=node:lts-alpine`) plus the globally injected ones.
+ *
+ * `options.buildArgs` wins on a key collision: it holds what `resolve` injected
+ * (`VERSION`, `GOPROXY`, …) and what the repository wrote in `DOCKER_BUILD_ARGS`,
+ * which is the more explicit statement of intent.
+ */
+export function effectiveBuildArgs(build, options) {
+  const merged = new Map();
+  for (const arg of build.buildArgs || []) merged.set(arg.key, arg);
+  for (const arg of options.buildArgs || []) merged.set(arg.key, arg);
+  return [...merged.values()];
+}
+
+/**
  * The full `docker buildx build` command line for one variant.
  *
  * `--push` and `--output type=cacheonly` are mutually exclusive outputs: the
@@ -75,7 +90,7 @@ export function buildxArgv({ build, options, metadataFile, provenanceSupported =
   for (const image of build.images) for (const tag of image.tags) argv.push('--tag', tag);
   argv.push(...labelArgs(build.labels));
   if (options.platforms.length > 0) argv.push('--platform', options.platforms.join(','));
-  for (const { key, value } of options.buildArgs) argv.push('--build-arg', `${key}=${value}`);
+  for (const { key, value } of effectiveBuildArgs(build, options)) argv.push('--build-arg', `${key}=${value}`);
   for (const source of options.cacheFrom) argv.push('--cache-from', source);
   for (const target of options.cacheTo) argv.push('--cache-to', target);
   if (options.pull) argv.push('--pull');
@@ -109,7 +124,7 @@ export function classicBuildArgv({ build, options }) {
   if (first) argv.push('--tag', first);
   argv.push(...labelArgs(build.labels));
   if (options.platforms.length === 1) argv.push('--platform', options.platforms[0]);
-  for (const { key, value } of options.buildArgs) argv.push('--build-arg', `${key}=${value}`);
+  for (const { key, value } of effectiveBuildArgs(build, options)) argv.push('--build-arg', `${key}=${value}`);
   if (options.pull) argv.push('--pull');
   if (options.noCache) argv.push('--no-cache');
   argv.push(options.context);
