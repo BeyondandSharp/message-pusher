@@ -128,28 +128,25 @@ sudo service nginx restart
 ```
 
 ### 本地构建镜像
-改过代码后想自己构建镜像、并导出成可直接导入 Docker 的镜像文件，用仓库根目录的两个脚本之一（在仓库根目录执行）：
+改过代码后想自己构建镜像、并导出成可直接导入 Docker 的镜像文件，用仓库根目录的 `build-image-alpine.sh`（在仓库根目录执行）：
 
 ```shell
-./build-image-alpine.sh     # 推荐：前端和后端都在容器内的 Alpine 里编译，本机只要有 docker
-./build-image.sh            # 前端用本机 pnpm 构建，后端在容器内编译（Dockerfile.local）
+./build-image-alpine.sh     # 前端和后端都在容器内的 Alpine 里编译，本机只要有 docker
 ```
 
-两者选项一致：
+脚本选项：
 
 | 选项 | 说明 |
 |---|---|
 | `[镜像名[:标签]]` | 镜像名，默认 `message-pusher:<git describe 出来的版本>` |
 | `-o, --output-dir DIR` | 镜像文件输出目录，默认 `dist` |
 | `--no-save` | 只构建镜像，不导出镜像文件 |
-| `--skip-frontend` | 仅 `build-image.sh`：复用已有的 `web/build`，不重新构建前端 |
 | `-h, --help` | 显示帮助 |
 
 ```shell
 ./build-image-alpine.sh                          # 生成 dist/message-pusher_<版本>-<架构>.tar
 ./build-image-alpine.sh message-pusher:v1        # 指定镜像名:标签
 ./build-image-alpine.sh -o out --no-save         # 换输出目录，且只构建不导出
-./build-image.sh --skip-frontend                 # 前端已经构建过，跳过这一步
 ```
 
 `<架构>` 由 `uname -m` 决定（`amd64` / `arm64`）。脚本最后会把镜像 `docker save` 成 tar 文件，
@@ -161,8 +158,7 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
   -e TZ=Asia/Shanghai -v "$(pwd)/data:/data" message-pusher:<版本>
 ```
 
-**依赖**：`build-image-alpine.sh` 只需要本机有 `docker`；`build-image.sh` 还需要 `pnpm`。
-前者每次都要在容器里重装一遍前端依赖，比复用本机 `web/node_modules` 的后者慢一些。
+**依赖**：只需要本机有 `docker`（前端、后端都在容器内编译，本机不需要 node / pnpm / go）。
 
 **构建时用到的下载代理**（都可用环境变量覆盖，设为空字符串即改用默认源）：
 
@@ -170,7 +166,7 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
 |---|---|---|
 | `APK_PROXY` / `APT_PROXY` | `http://192.168.2.12:3142` | apk / apt 包缓存代理：改写容器内 `/etc/apk/repositories`，Debian 系写 `/etc/apt/apt.conf.d/99proxy` |
 | `GOPROXY` | `http://192.168.2.12:50100,direct` | Go 模块代理（局域网里的 Athens） |
-| `NPM_REGISTRY` | 官方源 | npm registry，仅 `build-image-alpine.sh` 使用 |
+| `NPM_REGISTRY` | 官方源 | npm registry（容器内安装 pnpm 与前端依赖时使用） |
 
 ```shell
 # 不用局域网缓存，走公网默认源
@@ -183,16 +179,7 @@ NPM_REGISTRY=https://registry.npmmirror.com \
 ```
 
 ### 手动部署
-1. 从 [GitHub Releases](https://github.com/BeyondandSharp/message-pusher/releases/latest) 下载可执行文件或者从源码编译：
-   ```shell
-   git clone https://github.com/BeyondandSharp/message-pusher.git
-   cd message-pusher/web
-   pnpm install
-   pnpm run build
-   cd ..
-   go mod download
-   go build -ldflags "-s -w" -o message-pusher
-   ````
+1. 从 [GitHub Releases](https://github.com/BeyondandSharp/message-pusher/releases/latest) 下载对应平台的可执行文件：
 2. 运行：
    ```shell
    chmod u+x message-pusher
@@ -741,4 +728,4 @@ send_message('标题', '描述', '**Markdown 内容**')
 ## 其他
 1. `v0.3` 之前的版本基于 Node.js，你可以切换到 [`nodejs`](https://github.com/BeyondandSharp/message-pusher/tree/nodejs) 分支查看，该版本不再有功能性更新。
 2. `v0.3` 以及后续版本基于 Gin Template [`v0.2.1`](https://github.com/songquanpeng/gin-template) 版本开发。
-3. 如果想要自行编译，请首先[编译前端](./web/README.md)，之后再编译后端，否则会遇到 `pattern web/build: no matching files found` 问题。
+3. 需要自行构建时，用仓库根目录的 `./build-image-alpine.sh` 构建镜像（前端与后端都在容器内编译，本机不需要 node / pnpm / go）。

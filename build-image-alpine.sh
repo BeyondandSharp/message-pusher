@@ -3,7 +3,7 @@
 # 一键构建 message-pusher 的 Docker 镜像（全 Alpine 一体化构建），
 # 并导出成可直接 docker load 的镜像文件。
 #
-# 与 build-image.sh 的区别：前端和后端都在容器内的 Alpine 里编译，
+# 前端和后端都在容器内的 Alpine 里编译，
 # 宿主机只需要有 docker，不需要本机安装 pnpm / node / go。
 #
 # 用法：
