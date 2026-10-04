@@ -1,0 +1,187 @@
+# docker-publish — tag-triggered container image release to ghcr.io / Docker Hub.
+#
+# The programs live as real files in <action>/scripts/*.mjs and are executed with
+# `node "$forgejo_dir/scripts/run.mjs" <subcommand>`; this file only orchestrates
+# them. The reference implementations are the three official Docker Actions
+# (build-push-action v7.4.0, metadata-action v6.2.0, login-action v4.6.0) kept in
+# this repository under ref/docker-build-push/ — they are reference material only
+# and are never copied to a target repository.
+#
+# Usage: copy this docker-build-push/ directory into a target repository, rename
+# it to .forgejo, and the workflow runs there. It only reads the target
+# repository's Dockerfiles, build outputs and git ref.
+#
+# Flow: tag push -> version check -> preflight -> docker login -> tags/labels
+# -> one build per variant -> push -> digest summary.
+#
+# Variants (built independently, each compiling its own artifact):
+#   alpine  -> tags suffixed -alpine
+#   trixie  -> tags suffixed -trixie PLUS the unsuffixed tags and `latest`
+# Every variant is one `docker build` invocation against its own Dockerfile;
+# nothing is shared between variants and no variant is produced by retagging
+# another one.
+#
+# Repository secrets/variables (tokens may live in either place):
+#   GHCR_TOKEN            GitHub PAT with write:packages -> enables ghcr.io
+#   DOCKERHUB_TOKEN       Docker Hub access token      -> enables Docker Hub
+#   DOCKERHUB_USERNAME    Docker Hub user + namespace  (required with the token)
+#   GHCR_OWNER / GHCR_IMAGE / GHCR_USER   when the GHCR namespace differs from the
+#                                         Forgejo owner (it usually does)
+# Optional variables: DOCKER_IMAGE_NAME, DOCKER_VARIANTS, DOCKER_DEFAULT_VARIANT,
+#   DOCKER_CONTEXT, DOCKER_META_IMAGES, DOCKER_META_TAGS, DOCKER_META_FLAVOR,
+#   DOCKER_META_LABELS, DOCKER_BUILD_ARGS, DOCKER_PLATFORMS, DOCKER_CACHE_FROM,
+#   DOCKER_CACHE_TO, DOCKER_PULL, DOCKER_NO_CACHE, DOCKER_PROVENANCE,
+#   DOCKER_ALLOW_ANY_TAG, SKIP_TOOL_INSTALL, and the proxy variables
+#   (ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / APK_PROXY /
+#   YUM_PROXY).
+#
+# Runner requirement: the job needs a reachable Docker daemon. A container job
+# reaches it only when the runner mounts the socket — see the README for the two
+# supported setups (`container.options` volume mount + runner `valid_volumes`,
+# or a host runner). preflight fails with that checklist printed.
+
+name: docker-publish
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本，例如 1.4.0；填写时必须与已有 tag 的版本一致'
+        required: false
+        type: string
+      variants:
+        description: '可选：只构建指定变体，逗号分隔（默认全部）'
+        required: false
+        type: string
+      dry_run:
+        description: '只验证构建，不登录、不推送'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: docker-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+# `sh`, not `bash`: Alpine and other minimal images ship BusyBox sh but no bash
+# (`/bin/sh` exists everywhere). The few remaining shell lines are POSIX.
+defaults:
+  run:
+    shell: sh
+
+jobs:
+  publish:
+    name: docker build and push
+    # No runner-label or job-image variable on purpose: the Action works with the
+    # conventional `docker` label and the same default image as npm-publish.
+    runs-on: docker
+    container:
+      image: node:22-bookworm
+      # A container job only reaches the daemon when the socket is mounted (and
+      # the runner's valid_volumes allows it):
+      # options: --volume /var/run/docker.sock:/var/run/docker.sock
+    timeout-minutes: 120
+    env:
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || vars.GHCR_TOKEN }}
+      GHCR_IMAGE: ${{ vars.GHCR_IMAGE }}
+      GHCR_OWNER: ${{ vars.GHCR_OWNER }}
+      GHCR_USER: ${{ vars.GHCR_USER }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN }}
+      DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
+      DOCKER_VARIANTS: ${{ vars.DOCKER_VARIANTS }}
+      DOCKER_DEFAULT_VARIANT: ${{ vars.DOCKER_DEFAULT_VARIANT }}
+      DOCKER_CONTEXT: ${{ vars.DOCKER_CONTEXT }}
+      DOCKER_META_IMAGES: ${{ vars.DOCKER_META_IMAGES }}
+      DOCKER_META_TAGS: ${{ vars.DOCKER_META_TAGS }}
+      DOCKER_META_FLAVOR: ${{ vars.DOCKER_META_FLAVOR }}
+      DOCKER_META_LABELS: ${{ vars.DOCKER_META_LABELS }}
+      DOCKER_BUILD_ARGS: ${{ vars.DOCKER_BUILD_ARGS }}
+      DOCKER_PLATFORMS: ${{ vars.DOCKER_PLATFORMS }}
+      DOCKER_CACHE_FROM: ${{ vars.DOCKER_CACHE_FROM }}
+      DOCKER_CACHE_TO: ${{ vars.DOCKER_CACHE_TO }}
+      DOCKER_PULL: ${{ vars.DOCKER_PULL }}
+      DOCKER_NO_CACHE: ${{ vars.DOCKER_NO_CACHE }}
+      DOCKER_PROVENANCE: ${{ vars.DOCKER_PROVENANCE }}
+      DOCKER_ALLOW_ANY_TAG: ${{ vars.DOCKER_ALLOW_ANY_TAG }}
+      SKIP_TOOL_INSTALL: ${{ vars.SKIP_TOOL_INSTALL }}
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_VARIANTS: ${{ inputs.variants }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      # Proxies: passed through for the package managers (ensure-tools) and for
+      # docker build, which forwards them into the build containers.
+      ALL_PROXY: ${{ vars.ALL_PROXY }}
+      HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+      HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
+      NO_PROXY: ${{ vars.NO_PROXY }}
+      APT_PROXY: ${{ vars.APT_PROXY }}
+      APK_PROXY: ${{ vars.APK_PROXY }}
+      YUM_PROXY: ${{ vars.YUM_PROXY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The build uses the path context, so a shallow checkout is enough.
+          # Set `submodules: true` in a repository that vendors sources as
+          # submodules.
+          fetch-depth: 1
+
+      # github.action_path is empty for workflows (it is set only for a
+      # `uses: ./path` local action), so the copied .forgejo directory is found by
+      # the program and published as forgejo_dir. The two lines below only locate
+      # the entry point itself: the real search (nested checkouts, parent mounts,
+      # diagnostics) lives in locate-action.mjs.
+      - name: Locate action directory
+        id: locate
+        run: |
+          dir="${{ github.action_path }}"
+          [ -f "$dir/scripts/build-push.mjs" ] || dir="$GITHUB_WORKSPACE/.forgejo"
+          [ -f "$dir/scripts/build-push.mjs" ] || dir="$(dirname "$(dirname "$(find "$GITHUB_WORKSPACE" -maxdepth 6 -name build-push.mjs -path '*/scripts/*' -print -quit)")")"
+          node "$dir/scripts/run.mjs" locate-action
+
+      # Install the docker CLI (and buildx when the image ships it) with the
+      # image's own package manager, through the configured proxy. Skipped
+      # automatically when both are present; SKIP_TOOL_INSTALL=true opts out.
+      - name: Ensure container tools
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" ensure-tools
+
+      - name: Verify action scripts
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" verify-action
+
+      - name: Resolve version and variants
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" resolve
+
+      - name: Preflight checks
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" preflight
+
+      - name: Log in to registries
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" login
+
+      - name: Compute tags and labels
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" meta
+
+      - name: Build and push
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" build-push
+
+      - name: Summary
+        run: |
+          dir="${{ steps.locate.outputs.forgejo_dir }}"
+          node "$dir/scripts/run.mjs" summary
