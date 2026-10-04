@@ -18,12 +18,11 @@
 #   ./build-image.sh -o out                   # 指定镜像文件输出目录（默认 dist）
 #   ./build-image.sh --no-save                # 只构建镜像，不导出镜像文件
 #
-# 三类包下载代理都默认指向局域网里的缓存服务，均可用环境变量覆盖，
-# 设为空字符串则改用默认源：
-#   apk / apt 包缓存：http://192.168.2.12:3142   （APK_PROXY / APT_PROXY）
-#   Go 模块代理：http://192.168.2.12:50100      （GOPROXY，局域网内的 Athens）
-#   npm registry：默认官方源，可用 NPM_REGISTRY 指定镜像
-# 例如：NPM_REGISTRY=https://registry.npmmirror.com ./build-image.sh
+# 三类包下载代理全部通过环境变量传入，都没有默认值；不设置就走各语言的官方源：
+#   APK_PROXY / APT_PROXY   apk / apt 包缓存代理（改写容器内仓库地址）
+#   GOPROXY                 Go 模块代理（不设置则用 Go 官方代理 proxy.golang.org）
+#   NPM_PROXY / NPM_REGISTRY  前端 npm registry（不设置则用官方源）
+# 例如：NPM_PROXY=https://registry.npmmirror.com ./build-image.sh
 
 set -euo pipefail
 
@@ -47,8 +46,8 @@ usage() {
   ./build-image.sh --variant alpine               # alpine
   ./build-image.sh --variant alpine message-pusher:v1
   ./build-image.sh --no-save
-  NPM_REGISTRY=https://registry.npmmirror.com ./build-image.sh
-  APK_PROXY= APT_PROXY= GOPROXY= ./build-image.sh    # 不用局域网缓存代理，走公网默认源
+  NPM_PROXY=https://registry.npmmirror.com ./build-image.sh
+  APK_PROXY= APT_PROXY= GOPROXY= ./build-image.sh    # 显式留空，强制走各语言官方源
 EOF
   exit "${1:-0}"
 }
@@ -123,18 +122,20 @@ echo "==> 变体：${VARIANT}（${DOCKERFILE}）"
 echo "==> 版本：${VERSION}"
 echo "==> 镜像：${IMAGE}"
 
-# 包缓存代理：默认指向局域网里的 apk/apt 缓存代理；设为空字符串可禁用。
-# 例如：APK_PROXY= ./build-image.sh
-APK_PROXY="${APK_PROXY-http://192.168.2.12:3142}"
-APT_PROXY="${APT_PROXY-http://192.168.2.12:3142}"
-# Go 模块代理：默认走局域网里的 Athens；设为空字符串则用 Go 自带默认（proxy.golang.org）
-GOPROXY="${GOPROXY-http://192.168.2.12:50100,direct}"
+# 包缓存代理：未设置则不使用（走官方源）
+# 例如：APK_PROXY=https://your-apt-proxy ./build-image.sh
+APK_PROXY="${APK_PROXY-}"
+APT_PROXY="${APT_PROXY-}"
+# Go 模块代理：默认走自建缓存代理；设为空字符串则用 Go 自带默认（proxy.golang.org）
+GOPROXY="${GOPROXY-}"
 
 BUILD_ARGS=(--build-arg "VERSION=${VERSION}" \
             --build-arg "APK_PROXY=${APK_PROXY}" \
             --build-arg "APT_PROXY=${APT_PROXY}" \
             --build-arg "GOPROXY=${GOPROXY}")
-if [[ -n "${NPM_REGISTRY:-}" ]]; then
+# 兼容两种命名：NPM_REGISTRY（文档里用的）与 NPM_PROXY
+NPM_REGISTRY="${NPM_REGISTRY:-${NPM_PROXY:-}}"
+if [[ -n "${NPM_REGISTRY}" ]]; then
   BUILD_ARGS+=(--build-arg "NPM_REGISTRY=${NPM_REGISTRY}")
 fi
 [[ -n "${APK_PROXY}" ]] && echo "==> apk/apt 代理：${APK_PROXY}"

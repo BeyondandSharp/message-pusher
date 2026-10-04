@@ -13,11 +13,11 @@
 FROM node:24-trixie-slim AS frontend
 
 ARG VERSION=dev
-ARG NPM_REGISTRY=https://registry.npmjs.org
+ARG NPM_REGISTRY=""
 
 WORKDIR /build/web
 
-RUN npm install -g pnpm --registry=${NPM_REGISTRY}
+RUN npm install -g pnpm ${NPM_REGISTRY:+--registry=${NPM_REGISTRY}}
 
 # 先只拷贝依赖清单，依赖没变时可以复用这一层缓存；带上 lockfile 以保证装到同样的版本。
 # pnpm-workspace.yaml 也必须带上：里面的 minimumReleaseAgeExclude 是 pnpm 的发布年龄策略豁免，
@@ -28,7 +28,7 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 # 这些脚本对构建产物没有影响，用 --ignore-scripts 安装即可。
 # BuildKit 缓存挂载用于保留 pnpm store：重复构建和失败重试都不用重新下载。
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --ignore-scripts --registry=${NPM_REGISTRY}
+    pnpm install --ignore-scripts ${NPM_REGISTRY:+--registry=${NPM_REGISTRY}}
 
 COPY web/ ./
 
@@ -42,9 +42,9 @@ RUN VITE_APP_VERSION="${VERSION}" pnpm run build
 FROM golang:1.27-trixie AS backend
 
 ARG VERSION=dev
-# Go 模块代理：默认走局域网里的 Athens 缓存代理（实测冷缓存拉全依赖约 10 秒）。
-# 可用 --build-arg GOPROXY=... 覆盖；传空字符串则回落到 Go 自带的 proxy.golang.org。
-ARG GOPROXY=http://192.168.2.12:50100,direct
+# Go 模块代理：默认不设置，使用 Go 自带的 proxy.golang.org；需要缓存/镜像时用
+# --build-arg GOPROXY=https://your-proxy,direct 指定。
+ARG GOPROXY=""
 ARG APT_PROXY=""
 # 本变体不使用 Alpine；APK_PROXY 仅为兼容脚本/CI 统一传入的构建参数而声明。
 ARG APK_PROXY=""
@@ -56,11 +56,7 @@ ENV GO111MODULE=on \
 
 WORKDIR /build
 
-# 把 apt 指向缓存代理：这类代理（如 soulteary/apt-proxy）是把上游域名拼进 path 的反向代理。
-# APT_PROXY 为空时这一步不做任何事。
-RUN if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
-      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
-    fi
+# 本阶段不需要 apt（golang:1.27-trixie 自带 gcc 与 libc6-dev）
 
 # go-sqlite3 依赖 CGO；golang:1.27-trixie 自带 gcc 与 libc6-dev，无需再装构建工具链。
 
@@ -92,14 +88,24 @@ LABEL org.opencontainers.image.title="message-pusher" \
 ENV PORT=3000 \
     TZ=Asia/Shanghai
 
-# 同构建阶段：让运行时的包安装也走缓存代理（本阶段只有 apt）
-RUN if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
-      printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
-    fi
+# 本阶段不需要 apt（golang:1.27-trixie 自带 gcc 与 libc6-dev）
 
-# Debian 官方镜像不带证书与时区数据；用 -trixie-slim 保持体积
+# debian:*-slim 既没有 CA 证书库也没有时区数据。分两步引导：
+#   1) 先用镜像自带的官方源装 ca-certificates —— 这些源是 http，不需要证书校验；
+#   2) 如果配置了 APT_PROXY（通常是 https 自建镜像），再改写 sources 由它装 tzdata。
+# 这样无论是否有内网镜像、无论镜像是否 https，都能装上。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN if [ -n "${APT_PROXY}" ]; then \
+      for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
+        [ -f "$f" ] || continue; \
+        sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${APT_PROXY}/|g; s|^deb[[:space:]]+https?://|deb ${APT_PROXY}/|g" "$f"; \
+      done; \
+    fi; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend /build/message-pusher /

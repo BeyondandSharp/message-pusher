@@ -74,7 +74,7 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 
 ## 部署
 ### 通过 Docker 部署
-部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v /home/ubuntu/data/message-pusher:/data ghcr.io/beyondandsharp/message-pusher`
+部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v "$(pwd)/data:/data ghcr.io/beyondandsharp/message-pusher`
 
 打 tag 后，`docker-image-amd64` / `docker-image-arm64` 两个 workflow 会自动构建并推送镜像到 GHCR：`ghcr.io/<你的 GitHub 用户名>/message-pusher`。
 
@@ -82,7 +82,7 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 
 开放的端口号为 3000，之后用 Nginx 配置域名，反代以及 SSL 证书即可，具体参考[详细部署教程](https://iamazing.cn/page/how-to-deploy-a-website)。
 
-数据将会保存在宿主机的 `/home/ubuntu/data/message-pusher` 目录（只有一个 SQLite 数据库文件），请确保该目录存在且具有写入权限，或者更改为合适的目录。
+数据将会保存在宿主机的 `$(pwd)/data` 目录（只有一个 SQLite 数据库文件），请确保该目录存在且具有写入权限，或者更改为合适的目录。
 
 Nginx 的参考配置：
 ```
@@ -173,13 +173,13 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
 
 **依赖**：只需要本机有 `docker`（前端、后端都在容器内编译，本机不需要 node / pnpm / go）。
 
-**构建时用到的下载代理**（都可用环境变量覆盖，设为空字符串即改用默认源）：
+**构建时用到的下载代理**（全部通过环境变量传入，**均无默认值**；不设置就走各语言的官方源）：
 
-| 环境变量 | 默认值 | 用途 |
-|---|---|---|
-| `APK_PROXY` / `APT_PROXY` | `http://192.168.2.12:3142` | apk / apt 包缓存代理：改写容器内 `/etc/apk/repositories`，Debian 系写 `/etc/apt/apt.conf.d/99proxy` |
-| `GOPROXY` | `http://192.168.2.12:50100,direct` | Go 模块代理（局域网里的 Athens） |
-| `NPM_REGISTRY` | 官方源 | npm registry（容器内安装 pnpm 与前端依赖时使用） |
+| 环境变量 | 用途 |
+|---|---|
+| `APK_PROXY` / `APT_PROXY` | apk / apt 包缓存代理：改写容器内 `/etc/apk/repositories`，Debian 系写 `/etc/apt/apt.conf.d/99proxy` |
+| `GOPROXY` | Go 模块代理（不设置则用 Go 官方代理） |
+| `NPM_PROXY` / `NPM_REGISTRY` | npm registry（容器内安装 pnpm 与前端依赖时使用；不设置则用官方源） |
 
 ```shell
 # 不用局域网缓存，走公网默认源
@@ -187,7 +187,7 @@ APK_PROXY= APT_PROXY= GOPROXY= ./build-image.sh
 
 # 换成其它代理 / npm 镜像
 GOPROXY=https://goproxy.cn,direct \
-NPM_REGISTRY=https://registry.npmmirror.com \
+NPM_PROXY=https://registry.npmmirror.com \
 ./build-image.sh message-pusher:v1
 ```
 
