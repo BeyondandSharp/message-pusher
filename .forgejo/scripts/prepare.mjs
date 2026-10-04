@@ -23,7 +23,7 @@ import { closeSync, existsSync, openSync, readFileSync, realpathSync } from 'nod
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildOptionsFrom, parseVariants, platformsFor, readOptional, variantTableRaw } from './config.mjs';
+import { buildOptionsFrom, isTruthy, parseVariants, platformsFor, readOptional, variantTableRaw } from './config.mjs';
 import { hasBinary, probeDocker } from './endpoints.mjs';
 
 // Run directly (argv[1] is this file) rather than imported by a test.
@@ -49,12 +49,6 @@ export const DOCKER_PREREQUISITE = [
   '  2) daemon 由 runner 提供：设置 container.docker_host: automount（或仓库变量 DOCKER_HOST 指向它），',
   '     prepare 检测到可达的 daemon 后会直接使用，不会再去启动 dockerd。',
 ].join('\n');
-
-const TRUTHY = ['1', 'true', 'yes', 'on'];
-
-export function isTruthy(value) {
-  return TRUTHY.includes(readOptional(value).toLowerCase());
-}
 
 /** `x86_64` / `aarch64` / `armv7l` … → the arch name Docker uses. */
 export const ARCH_ALIASES = {

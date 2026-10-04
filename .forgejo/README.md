@@ -9,15 +9,21 @@ push tag v1.2.3
       │
       ├─ plan 作业：校验变体表 → 顺序变体列表（同时给出矩阵，供可选并行模式）   plan-matrix
       │
-      └─ 一个 publish job（job 容器 = docker:dind），按表内顺序逐个变体：
-            ├─ 容器内装运行环境（node/git/curl）                    Bootstrap（内联 sh）
-            ├─ 解析版本与变体                                       resolve
-            ├─ 容器内准备构建环境（dockerd / buildx / 额外包 / binfmt） prepare
-            ├─ 预检：凭据 / 变体 Dockerfile / tag 冲突 / daemon      preflight
-            ├─ docker login ghcr.io、docker.io（token 走 stdin）     login
-            ├─ 推导 tags 与 OCI labels（每个变体一份）               meta
-            ├─ 每个变体各自 buildx build --platform … --push        build-push
-            └─ digest 汇总（job summary + 日志）                     summary
+      ├─ build 作业（job 容器 = docker:dind），按表内顺序逐个变体：
+      │     ├─ 容器内装运行环境（node/git/curl）                    Bootstrap（内联 sh）
+      │     ├─ 解析版本与变体                                       resolve
+      │     ├─ 容器内准备构建环境（dockerd / buildx / 额外包 / binfmt） prepare
+      │     ├─ 预检：凭据 / 变体 Dockerfile / tag 冲突 / daemon      preflight
+      │     ├─ docker login ghcr.io、docker.io（token 走 stdin）     login
+      │     ├─ 推导 tags 与 OCI labels（每个变体一份）               meta
+      │     ├─ 每个变体各自 buildx build --platform … --push 到 staging  build-push
+      │     └─ 汇总（staging 标签 + digest）                         summary
+      │
+      └─ publish 作业（needs: build；不需要 daemon）：
+            ├─ 重新解析版本/标签，校验所有 staging 都在                 resolve / preflight / meta
+            ├─ docker login（同样两个 registry）                        login
+            ├─ buildx imagetools create：staging → 最终标签（含 latest） publish
+            └─ 汇总（最终标签 + digest）                                summary
 ```
 
 ```
@@ -51,14 +57,15 @@ cp -r docker-build-push /path/to/target-repo/.forgejo
     ├── preflight.mjs         # 预检（凭据、Dockerfile、tag 冲突、daemon）
     ├── meta.mjs              # tags 与 OCI labels 推导（对应 metadata-action）
     ├── login.mjs             # docker login（对应 login-action）
-    ├── build-push.mjs        # 每变体一次构建并推送（对应 build-push-action）
+    ├── build-push.mjs        # 每变体一次构建，推到 staging（对应 build-push-action）
+    ├── publish.mjs           # staging → 最终标签（buildx imagetools，对应 metadata 之后的发布）
     └── summary.mjs           # digest 汇总
 ```
 
 workflow 里每一步都长这样（`配置里没有内嵌脚本`）：
 
 ```yaml
-      - name: Build and push
+      - name: Build and stage
         run: |
           dir="${{ steps.locate.outputs.forgejo_dir }}"
           node "$dir/scripts/run.mjs" build-push
@@ -66,7 +73,7 @@ workflow 里每一步都长这样（`配置里没有内嵌脚本`）：
 
 唯一的例外是 `Bootstrap job container`（要先有 node 才能跑脚本）与定位步骤本身（要先找到 `run.mjs` 才能调用它）。
 
-可用子命令：`locate-action`、`verify-action`、`plan-matrix`、`prepare`、`resolve`、`preflight`、`login`、`meta`、`build-push`、`summary`；都能在本地直接跑，例如
+可用子命令：`locate-action`、`verify-action`、`plan-matrix`、`prepare`、`resolve`、`preflight`、`login`、`meta`、`build-push`、`publish`、`summary`；都能在本地直接跑，例如
 `GITHUB_WORKSPACE=$PWD node scripts/run.mjs locate-action`。
 
 复制不全会被 `verify-action` 拦下并逐个列出缺哪个文件。
@@ -252,6 +259,7 @@ FROM ${NODE_IMAGE} AS frontend
 | `DOCKER_BUILD_ARGS` | 空 | 每行 `KEY=VALUE`（值里可以有逗号）。`VERSION` 已自动注入，这里写了就覆盖它 |
 | `DOCKER_PLATFORMS` | 空（= 各变体自己的第七列；都没有则 = 主机平台） | 例如 `linux/amd64,linux/arm64`；>1 平台时自动建 `docker-container` builder |
 | `DOCKER_JOB_PACKAGES` | 空 | 工作台镜像缺少的额外包（空格/逗号分隔），由 `prepare` 用容器里的包管理器安装 |
+| `DOCKER_FORCE_BUILD` | 空 | 设为 `1/true` 时即使 staging 标签已存在也重建（默认复用已 staged 的变体） |
 | `DOCKER_SKIP_BINFMT` | 空 | 设为 `1/true` 时 `prepare` 不再尝试注册 QEMU binfmt |
 | `DOCKER_BINFMT_IMAGE` | `tonistiigi/binfmt` | 注册 binfmt 用的镜像（内网镜像可覆盖） |
 | `DOCKER_BUILDKIT_IMAGE` | 空（buildx 默认） | 覆盖 BuildKit 容器镜像（`--driver-opt image=`），内网场景有用 |
@@ -313,22 +321,46 @@ runner 没有直连外网时，先分清三件不同的事：**代理**（forwar
 | `alpine` | `v1.2.3-alpine`、`1.2.3-alpine`、`1.2-alpine`、`sha-abc1234-alpine`、`alpine` |
 | `trixie-slim`（默认） | 上面一套（换成 `-trixie-slim`）**＋** 无后缀：`v1.2.3`、`1.2.3`、`1.2`、`sha-abc1234`、`latest` |
 
-## 顺序构建与可选并行模式
+## 先构建全部变体，再统一发布（build / publish 两个作业）
 
-默认是**顺序构建**：`plan` 作业输出有序变体列表（`variants=alpine,trixie-slim`），`publish` 作业按表内顺序逐个变体执行 `resolve → preflight → login → meta → build-push`，`build-push` 一个变体一个变体地调用 `docker buildx build`。
+一次发布分两步，**所有变体和架构都建好之前不会出现任何最终标签**：
 
-为什么不用 matrix 并行：
+| 作业 | 干什么 | 时间 |
+| --- | --- | --- |
+| `plan` | 校验变体表，输出有序变体列表（`variants=alpine,trixie-slim`）和矩阵形式 | 秒级 |
+| `build` | 按表内顺序逐个变体构建（每变体一次 `buildx build --platform …`），**只推 staging 标签**：`<镜像>:staging-<版本>-<sha>-<变体>` | 几分钟～几十分钟 |
+| `publish` | 先确认每个变体的 staging 都在，再用 `docker buildx imagetools create` 把 staging **提升**为最终标签（含 `latest`） | 秒级 |
+
+要点：
+
+- **staging 标签不是最终产物**，只是"候选镜像"；它带版本号和短 sha，所以同名 tag 用新代码重推时会生成新的 staging ref（触发重建），不会把旧候选提升出去。
+- **提升是同仓库的 manifest 拷贝**（不重传 blob、不重新构建），所以 `latest` 只在最后一个变体也成功后出现。
+- **任何变体失败 → build 作业失败 → publish 作业不运行 → 一个最终标签都不会产生**。
+
+### 发布失败怎么重发（不用重新构建）
+
+| 情况 | 做法 |
+| --- | --- |
+| publish 失败（网络/registry 5xx/token 过期） | 只重跑 **publish 作业**（Forgejo 17：`POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun`）；秒级完成 |
+| 实例只支持整轮重跑（Forgejo 16） | 直接重跑整轮：build 作业会打印 `已存在 staging 镜像，跳过构建`，只补建缺失的变体，然后 publish 再试一次 |
+| 想强制重建全部 | 设仓库变量 `DOCKER_FORCE_BUILD=1`（或删掉对应的 staging 标签） |
+
+> staging 标签会留在 registry 里（每个变体每条 registry 1 个），属于内部标签，可定期清理；清理后重跑 build 即可重建。
+
+### 顺序构建与可选并行模式
+
+`build` 作业按表内顺序逐个变体构建。为什么不用 matrix 并行：
 
 - `strategy.max-parallel` 在 Forgejo 里**会被接受但不生效**（[runner#1540](https://code.forgejo.org/forgejo/runner/issues/1540)），matrix 无法限流；
-- 顺序执行让两个变体共用同一个 job 容器里的 dockerd 与 buildx builder，也避免两份 QEMU 跨架构构建抢同一台机器的 CPU；
-- **第一个失败的变体会中止后续变体**：一次失败的发布不会把 `latest` 移到不完整的产物上，修好后重推 tag 即可。
+- 顺序执行让两个变体共用同一个 job 容器里的 dockerd 与 buildx builder（BuildKit 的模块/层缓存也共享），也避免两份 QEMU 跨架构构建抢同一台机器的 CPU；
+- **第一个失败的变体会中止后续变体**，加上 build/publish 分离，一次失败的发布绝不会把 `latest` 移到不完整的产物上。
 
-一个 job 覆盖全部变体，所以 `timeout-minutes: 180` 是全部变体的总预算，外层还有 runner 的 `runner.timeout`（默认 3h）；两个变体加起来超过它的话两处都要调大。
+`build` 作业覆盖全部变体，所以它的 `timeout-minutes: 180` 是全部变体的总预算，外层还有 runner 的 `runner.timeout`（默认 3h）；两个变体加起来超过它的话两处都要调大。
 
 **想换回并行**（变体互相独立、一个失败不取消另一个）时改三行即可——`plan` 作业已经同时输出了矩阵形式：
 
 ```yaml
-  publish:
+  build:
     needs: plan
     strategy:
       fail-fast: false
@@ -338,7 +370,7 @@ runner 没有直连外网时，先分清三件不同的事：**代理**（forwar
       INPUT_VARIANTS: ${{ matrix.variant }}      # 原来是 needs.plan.outputs.variants
 ```
 
-这需要 runner + Forgejo 支持「`strategy.matrix` 引用 `needs.*.outputs`」（上游 runner PR #1190 / Forgejo PR #10244，2025-11 合入）。旧实例上就别切并行。
+这需要 runner + Forgejo 支持「`strategy.matrix` 引用 `needs.*.outputs`」（上游 runner PR #1190 / Forgejo PR #10244，2025-11 合入）。旧实例上就别切并行；注意并行时若某个变体失败，`publish` 仍然不会运行（它 needs 整个 `build` 作业）。
 
 ## runner 前置条件（重要）
 
@@ -357,17 +389,17 @@ container:
 
 | 需要 | 谁提供 |
 | --- | --- |
-| `docker` CLI + `dockerd` | 工作台镜像（默认 `docker:dind` 自带） |
-| `buildx` 插件 | 同上；换镜像时 `prepare` 会尝试安装 |
-| node / git / curl | workflow 第一步 `Bootstrap job container` 用容器里的 apk/apt/dnf/yum 安装 |
+| `docker` CLI + `dockerd` | 工作台镜像（默认 `docker:dind` 自带）；只有 `build` 作业需要 daemon |
+| `buildx` 插件 | 同上；换镜像时 `prepare` 会尝试安装（`publish` 用它的 `imagetools`） |
+| node / git / curl | 每个作业第一步 `Bootstrap job container` 用容器里的 apk/apt/dnf/yum 安装 |
 | 额外工具（gcc、make…） | 仓库变量 `DOCKER_JOB_PACKAGES`，由 `prepare` 安装 |
-| QEMU binfmt（多架构） | `prepare` 注册（除非 `DOCKER_SKIP_BINFMT=1`） |
+| QEMU binfmt（多架构） | `prepare` 注册（除非 `DOCKER_SKIP_BINFMT=1`）；只有 `build` 作业需要 |
 
-**不再需要任何 volume 挂载，也不需要 `valid_volumes`。**
+**不再需要任何 volume 挂载，也不需要 `valid_volumes`。** `publish` 作业不启动 dockerd、不需要 QEMU，也不受 privileged 之外的影响（它只和 registry 打交道）。
 
 ### `prepare` 做什么
 
-按顺序、幂等：
+只在 `build` 作业里运行，按顺序、幂等：
 
 1. 探测 daemon；不可达且镜像里有 `dockerd` → 在容器内启动它（日志 `/var/log/dockerd.log`，默认等待 90s，可用 `DOCKER_DIND_WAIT` 调整；overlay 起不来时自动用 `--storage-driver=vfs` 再试一次）。失败会打印 dockerd 日志尾部与上面的 runner 前置条件。
 2. 补 `buildx`：优先发行版包（alpine `docker-cli-buildx`、apt/dnf `docker-buildx-plugin`），再不行从 `DOCKER_BUILDX_URL`（默认 buildx 官方 latest）下载插件。
@@ -425,17 +457,17 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 "
 ```
 
-`test/docker-layout-e2e.test.mjs` 就是这么做的：PATH 上放一个假 `docker`（记录 argv、伪造 `buildx build` / `login` / `run`），按真实步骤顺序跑 `locate → verify → prepare → resolve → preflight → login → meta → build-push → summary`，并断言「每个变体一次构建」「每个变体带自己的 `--platform`」「token 不进 argv/日志/状态文件」「没有 buildx 时 preflight 失败」。
+`test/docker-layout-e2e.test.mjs` 就是这么做的：PATH 上放一个假 `docker`（记录 argv、伪造 `buildx build` / `imagetools` / `login` / `run`、并记住哪些 staging ref 已存在），按真实步骤顺序跑 `locate → verify → prepare → resolve → preflight → login → meta → build-push → summary`，再跑 `publish` 那套步骤，并断言「每个变体一次构建」「只推 staging、不出现最终标签」「其中一个变体缺失 staging 时一个最终标签都不建」「重跑会跳过已 staged 的变体」「token 不进 argv/日志/状态文件」。
 
 ## 行为细节
 
 - **只发布、不改仓库**：不 commit、不 push、不打 tag，也不修改工作区里的版本号。
-- **幂等性**：重复推同一个 tag 会重新构建并覆盖同名 tag（Docker 本身就是这个语义），不会报错。
-- **digest / 平台**：用 `--metadata-file` 读 `containerimage.digest`；汇总（日志与 `$GITHUB_STEP_SUMMARY`）会列出每个变体的平台与 digest。
+- **幂等性**：重复推同一个 tag 会重建候选并覆盖同名 staging 标签（Docker 本身就是这个语义），然后把最终标签提升过去，不会报错；staging 已存在时会跳过重建（`DOCKER_FORCE_BUILD=1` 可强制）。
+- **digest / 平台**：用 `--metadata-file` 读 `containerimage.digest`；汇总（日志与 `$GITHUB_STEP_SUMMARY`）会列出每个变体的平台、staging/最终标签与 digest。
 - **label**：`created/revision/version/source/url/title` 由脚本生成，`DOCKER_META_LABELS` 可覆盖。
-- **dry run**：`--output type=cacheonly`，不登录、不推送、不写 image store；没有任何凭据也能跑（会用 `ghcr.io/<owner>/<仓库>` 作为预览镜像名）。仍然需要 docker CLI + daemon + buildx。
-- **顺序**：一个 publish job 按变体表顺序逐个构建；第一个失败的变体会中止后续变体，因此一次失败的发布不会把 `latest` 移到不完整的产物上，修好后重推 tag 即可。`latest` 只属于默认变体。
-- **多 registry**：一次构建同时打上两个 registry 的标签，一次 push 推到两边；两个 registry 各登录一次。
+- **dry run**：`--output type=cacheonly`，不登录、不推送、不写 image store，`publish` 直接跳过；没有任何凭据也能跑（会用 `ghcr.io/<owner>/<仓库>` 作为预览镜像名）。仍然需要 docker CLI + daemon + buildx。
+- **构建与发布分离**：`build` 作业只推 staging，`publish` 作业在全部变体成功后统一提升；第一个失败的变体会中止后续变体，因此一次失败的发布不会把 `latest` 移到不完整的产物上。`latest` 只属于默认变体。
+- **多 registry**：一次构建同时把 staging 推到两个 registry（各自登录一次），提升时也是在各自 registry 内做 manifest 拷贝。
 
 ## 已知限制
 
@@ -449,6 +481,8 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 - 依赖 `actions/checkout@v4`（Forgejo 默认 actions registry）。若实例无法访问，改成全限定 URL `https://code.forgejo.org/actions/checkout@v4`。
 - 多架构构建在 QEMU 下明显慢于本机构建；一个变体的产物不能复用给另一个变体（**这是设计目标**）。
 - 变体默认**顺序**构建：第一个失败会中止后续变体（见「顺序构建与可选并行模式」）；`strategy.max-parallel` 在 Forgejo 里不生效，并行要靠 matrix + needs 动态矩阵。
+- **staging 标签会留在 registry 里**（`staging-<版本>-<sha>-<变体>`，每变体每 registry 一个），属于内部标签；本项目不做自动清理（GHCR/Docker Hub 删除需要额外权限）。
+- 「只重跑 publish」依赖实例支持重跑单个 job（Forgejo 17 的 API / UI）；更老的实例可以重跑整轮——`build` 作业会跳过已 staged 的变体，代价最小的那部分仍会重新执行。
 
 ### 已移除的变量与替代做法
 
@@ -469,20 +503,21 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(1
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 125 个用例的单元测试与假 docker 端到端，但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 138 个用例的单元测试与假 docker 端到端，但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否打开了 `container.privileged: true` 并重启过：日志里 `prepare` 应打印 `docker=…（本次启动）`，否则会带着 runner 侧清单失败。
 2. `actions/checkout@v4` 在该实例是否可达（Bootstrap 已装好 node/git）。
-3. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除）。
+3. `GHCR_TOKEN` / `DOCKERHUB_TOKEN` 的权限是否足够（`write:packages` / Docker Hub 读写+删除；提升是写操作，需要同样的写权限）。
 4. `secrets.GHCR_TOKEN || vars.GHCR_TOKEN` 这类表达式在该实例的解析结果是否符合预期。
 5. `${{ inputs.* }}` 是否被求值：不被求值时脚本会退回事件载荷并打警告，功能不受影响。
 6. 多架构：首次跑看 `prepare` 的 `binfmt=` 一栏；`missing:arm64` 说明宿主机没有 QEMU 处理器，需要宿主安装 qemu-user-static 或让 job 容器保持 privileged。
 7. 顺序构建的总耗时是否在 `timeout-minutes: 180` 与 runner 的 `runner.timeout`（默认 3h）之内。
+8. `build` 之后 `publish` 是否只做 manifest 提升：`publish` 日志里应只有 `buildx imagetools` 调用；想验证重发路径，可以在首次成功后重跑一次整轮，确认 `build` 打印「跳过构建」。
 
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs                        # 本 Action 的 125 个用例
+node --test test/docker-*.test.mjs                        # 本 Action 的 138 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

@@ -146,6 +146,34 @@ export function platformsFor(variant, options = {}) {
   return (options && options.platforms) || [];
 }
 
+/** `1` / `true` / `yes` / `on` — the switch convention of the repository variables. */
+export function isTruthy(value) {
+  return ['1', 'true', 'yes', 'on'].includes(readOptional(value).toLowerCase());
+}
+
+/**
+ * The tag one variant is staged under before it is published.
+ *
+ * The build job pushes every variant and every architecture to a staging tag
+ * instead of the final tags; a separate publish job then promotes a COMPLETE set
+ * to the final tags, so no variant (and never `latest`) becomes visible until
+ * all of them built. The tag carries the source sha, so re-tagging a version
+ * with new code produces a different staging ref (a rebuild) rather than
+ * promoting a stale artifact.
+ */
+export function stagingTagName({ version, shortSha = '', variant }) {
+  return sanitizeTagName(`staging-${version}-${shortSha || 'nosha'}-${variant}`);
+}
+
+/** The staging refs of one build: one per configured image base (per registry). */
+export function stagingRefsFor(build, state) {
+  const tag = stagingTagName({ version: state.version, shortSha: state.shortSha, variant: build.variant });
+  return (build.images || []).map((image) => {
+    const ref = `${image.base}:${tag}`;
+    return { base: image.base, registryId: image.registryId, tag, ref, tags: [ref] };
+  });
+}
+
 /**
  * Parse the variant table.
  *

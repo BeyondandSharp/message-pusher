@@ -124,6 +124,11 @@ export function preflightChecks({
     errors.push(error.message);
   }
 
+  // Publication only talks to the registries (`buildx imagetools create`), so it
+  // needs no daemon and no QEMU; a build needs both. The workflow marks the
+  // publish job with DOCKER_STEP=publish.
+  const publishOnly = readOptional(env.DOCKER_STEP) === 'publish';
+
   if (builds.length > 0) {
     const missing = missingDockerfiles(builds, state.options.context, exists);
     if (missing.length > 0) {
@@ -133,7 +138,7 @@ export function preflightChecks({
     // prepare registers them, but a host that already has them is normal too, so
     // this stays a warning: the build itself would fail with "exec format error".
     const requested = [...new Set(builds.flatMap((build) => platformsFor(build, state.options)))];
-    const foreign = missingBinfmt(requested, { arch, exists });
+    const foreign = publishOnly ? [] : missingBinfmt(requested, { arch, exists });
     if (foreign.length > 0) {
       warnings.push(
         `本次构建需要 ${foreign.join('、')} 的 QEMU 处理器，但 /proc/sys/fs/binfmt_misc 里没有对应条目：` +
@@ -144,14 +149,15 @@ export function preflightChecks({
 
   if (!docker.cli) {
     errors.push(`runner 里没有 docker 命令：${docker.error}\n${DOCKER_HELP}`);
-  } else if (!docker.daemon) {
+  } else if (!publishOnly && !docker.daemon) {
     errors.push(
       `连不上 Docker 守护进程：${dockerUnreachableReason(docker)}\n` +
         `docker version 的原始报错：${docker.error || 'unknown'}\n${DOCKER_HELP}`,
     );
   } else if (!docker.buildx) {
     errors.push(
-      'runner 里没有 docker buildx：本 Action 只用 `docker buildx build`（没有经典构建回退）。\n' +
+      'runner 里没有 docker buildx：本 Action 只用 `docker buildx build`（发布用 `buildx imagetools create`，' +
+        '没有经典构建回退）。\n' +
         `${DOCKER_HELP}`,
     );
   }

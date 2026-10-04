@@ -46,6 +46,7 @@ const PROGRAMS = {
   login: 'login.mjs',
   meta: 'meta.mjs',
   'build-push': 'build-push.mjs',
+  publish: 'publish.mjs',
   summary: 'summary.mjs',
 };
 
@@ -62,6 +63,7 @@ export const REQUIRED_SCRIPTS = [
   'login.mjs',
   'meta.mjs',
   'build-push.mjs',
+  'publish.mjs',
   'summary.mjs',
 ];
 
@@ -75,6 +77,7 @@ export const SUBCOMMANDS = [
   'login',
   'meta',
   'build-push',
+  'publish',
   'summary',
 ];
 

@@ -22,16 +22,25 @@ export const IS_DIRECT = (() => {
   }
 })();
 
-/** One line per published image tag, with its digest. */
+/** The refs one result is about: staged, published, or planned. */
+export function resultRefs(result) {
+  if (Array.isArray(result.published) && result.published.length > 0) return result.published;
+  if (Array.isArray(result.staging) && result.staging.length > 0) return result.staging;
+  return (result.images || []).flatMap((image) => image.tags);
+}
+
+/** One line per staged/published image tag, with its digest. */
 export function summaryLines(state) {
   const lines = [];
   for (const result of state.results || []) {
-    const status = result.builder === 'buildx' ? 'buildx' : 'docker（降级）';
-    const platforms = (result.platforms || []).join(',') || '本机';
-    lines.push(`${result.variant} [${status}] platforms=${platforms}${result.digest ? ` ${result.digest}` : ''}`);
-    for (const image of result.images || []) {
-      for (const tag of image.tags) lines.push(`  ${tag}`);
-    }
+    const status = result.builder === 'imagetools'
+      ? 'imagetools（提升）'
+      : result.builder === 'buildx'
+        ? (result.skipped ? 'buildx（复用 staging）' : 'buildx（staging）')
+        : 'docker（降级）';
+    const platforms = (result.platforms || []).length > 0 ? ` platforms=${result.platforms.join(',')}` : '';
+    lines.push(`${result.variant} [${status}]${platforms}${result.digest ? ` ${result.digest}` : ''}`);
+    for (const tag of resultRefs(result)) lines.push(`  ${tag}`);
   }
   return lines;
 }
@@ -48,10 +57,17 @@ export function summaryMarkdown(state) {
   const rows = [];
   for (const result of state.results || []) {
     const digest = result.digest || '—';
-    for (const image of result.images || []) {
-      for (const tag of image.tags) rows.push(`| ${result.variant} | \`${tag}\` | \`${digest}\` |`);
-    }
+    for (const ref of resultRefs(result)) rows.push(`| ${result.variant} | \`${ref}\` | \`${digest}\` |`);
   }
+  const published = (state.results || []).some((result) => result.builder === 'imagetools');
+  const staged = (state.results || []).some((result) => Array.isArray(result.staging) && result.staging.length > 0);
+  const pushLine = state.dryRun
+    ? '否（dry run）'
+    : published
+      ? '是（最终标签已发布）'
+      : staged
+        ? 'staging（最终标签由 publish 作业发布）'
+        : '否';
   return [
     `## docker-build-push ${state.version}`,
     '',
@@ -59,7 +75,7 @@ export function summaryMarkdown(state) {
     `- tag：${state.tag}（sha ${state.sha ? state.sha.slice(0, 7) : '—'}）`,
     `- 变体：${state.variants.map((variant) => variant.name).join('、')}`,
     `- 平台：${platformSummary(state)}`,
-    `- 推送：${state.options?.push && !state.dryRun ? '是' : '否'}`,
+    `- 推送：${pushLine}`,
     '',
     '| 变体 | tag | digest |',
     '| --- | --- | --- |',

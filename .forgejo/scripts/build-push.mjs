@@ -1,27 +1,36 @@
 // build-push.mjs — the Forgejo port of docker/build-push-action, limited to the
-// two supported registries.
+// two supported registries, plus the staging step that makes publishing a
+// separate, retryable job.
 //
-// Two things this module is strict about:
+// Three things this module is strict about:
 //
 //   1. One `docker buildx build` per variant. Each variant compiles its own
 //      artifact against its own base image; nothing is shared between variants,
 //      and no variant is ever produced by retagging another one. That is what
 //      makes "alpine" and "trixie-slim" honest builds rather than one build with
 //      two tags.
-//   2. buildx, always. There is no classic-builder fallback: the job container
-//      provides the CLI and the plugin (mounted from the host, or by using an
-//      image that has them), and preflight refuses to run without them.
+//   2. It pushes a STAGING tag, never the final ones. The final tags (including
+//      `latest`) are created by publish.mjs once every variant and architecture
+//      exists, so a half-finished run can never move `latest` and a failed
+//      publish can be retried without rebuilding.
+//   3. buildx, always. There is no classic-builder fallback: the job container
+//      provides the CLI and the plugin, and preflight refuses to run without
+//      them.
 //
 // Platforms and tags are orthogonal: variants are tags, platforms are manifest
 // list entries. When more than one platform is requested, a `docker-container`
 // builder is created for the run and removed afterwards.
+//
+// Re-running the workflow is cheap by design: a variant whose staging tag
+// already exists is not rebuilt (DOCKER_FORCE_BUILD=1 overrides that), so the
+// usual "publish failed, push the tag again" flow only re-runs publication.
 
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { platformsFor, readOptional } from './config.mjs';
+import { isTruthy, platformsFor, readOptional, stagingRefsFor } from './config.mjs';
 import { probeDocker } from './endpoints.mjs';
 import { statePath } from './resolve.mjs';
 
@@ -72,16 +81,20 @@ export function effectiveBuildArgs(build, options) {
 /**
  * The full `docker buildx build` command line for one variant.
  *
+ * `images` overrides the tags to attach: the build step passes the staging refs
+ * (`stagingRefsFor`), so the same builder invocation serves both the staging
+ * push and the tag model `meta` computed.
+ *
  * `--push` and `--output type=cacheonly` are mutually exclusive outputs: the
  * first publishes, the second validates the build without touching the image
  * store, which is what a dry run wants.
  */
-export function buildxArgv({ build, options, metadataFile, builder = '' }) {
+export function buildxArgv({ build, options, metadataFile, builder = '', images = null }) {
   const argv = ['buildx', 'build'];
   if (builder) argv.push('--builder', builder);
   argv.push('--file', build.dockerfile);
   if (build.target) argv.push('--target', build.target);
-  for (const image of build.images) for (const tag of image.tags) argv.push('--tag', tag);
+  for (const image of images || build.images) for (const tag of image.tags) argv.push('--tag', tag);
   argv.push(...labelArgs(build.labels));
   // Platforms are per variant: the variant table's seventh column wins, the
   // global DOCKER_PLATFORMS is the fallback. A single-platform build needs no
@@ -107,9 +120,11 @@ export function digestFromMetadata(json) {
 /** Run docker with the log streamed to ours (builds must show progress). */
 export function runDocker(args, { env = process.env, run = spawnSync, capture = false } = {}) {
   process.stdout.write(`$ docker ${args.join(' ')}\n`);
-  const result = run('docker', args, capture
-    ? { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env }
-    : { stdio: ['ignore', 'inherit', 'inherit'], env });
+  const result = run('docker', args, {
+    encoding: capture ? 'utf8' : undefined,
+    stdio: capture ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit'],
+    env,
+  });
   return {
     status: result.status === 0 ? 0 : result.status ?? 1,
     stdout: String(result.stdout || ''),
@@ -117,9 +132,23 @@ export function runDocker(args, { env = process.env, run = spawnSync, capture = 
   };
 }
 
-function buildOneVariant({ build, options, env, run, builder, workDir }) {
+/** Does a ref already exist in its registry? (registry-only buildx call) */
+export function refExists(ref, { env = process.env, run = spawnSync } = {}) {
+  return runDocker(['buildx', 'imagetools', 'inspect', ref], { env, run, capture: true }).status === 0;
+}
+
+/**
+ * Are all staging refs of one variant already pushed? When they are, the variant
+ * was built by an earlier run of this same version+sha and can be skipped —
+ * which is what makes "publish failed, re-run" cheap.
+ */
+export function stagingComplete(refs = [], deps = {}) {
+  return refs.length > 0 && refs.every((entry) => refExists(entry.ref, deps));
+}
+
+function buildOneVariant({ build, options, env, run, builder, workDir, staging }) {
   const metadataFile = join(workDir, `metadata-${build.variant}.json`);
-  const result = runDocker(buildxArgv({ build, options, metadataFile, builder }), { run, env });
+  const result = runDocker(buildxArgv({ build, options, metadataFile, builder, images: staging }), { run, env });
   if (result.status !== 0) throw new Error(`变体 ${build.variant} 构建失败（docker buildx build 退出码 ${result.status}）`);
 
   let digest = '';
@@ -130,7 +159,16 @@ function buildOneVariant({ build, options, env, run, builder, workDir }) {
       digest = '';
     }
   }
-  return { variant: build.variant, builder: 'buildx', digest, platforms: platformsFor(build, options), tagNames: build.tagNames, images: build.images };
+  return {
+    variant: build.variant,
+    builder: 'buildx',
+    digest,
+    platforms: platformsFor(build, options),
+    staging: staging.map((entry) => entry.ref),
+    tagNames: build.tagNames,
+    images: build.images,
+    skipped: false,
+  };
 }
 
 async function main() {
@@ -148,10 +186,14 @@ async function main() {
   }
 
   const workDir = mkdtempSync(join(tmpdir(), 'docker-build-push-'));
+  // The step owns the results: a second invocation in the same job (or a manual
+  // re-run of this step) must not append duplicates to the summary.
+  state.results = [];
   // A docker-container builder is required as soon as ONE variant asks for more
   // than one platform (the default builder cannot produce a manifest list).
   const needsBuilder = state.builds.some((build) => platformsFor(build, state.options).length > 1);
   const builder = needsBuilder ? `forgejo-docker-publish-${process.pid}` : '';
+  const force = isTruthy(env.DOCKER_FORCE_BUILD);
   let createdBuilder = false;
 
   try {
@@ -163,14 +205,35 @@ async function main() {
     for (const build of state.builds) {
       const options = state.dryRun ? { ...state.options, push: false } : state.options;
       const platforms = platformsFor(build, options);
+      const staging = stagingRefsFor(build, state);
       process.stdout.write(
         `==> ${build.variant}${build.isDefault ? '（默认）' : ''}：${build.dockerfile}${build.target ? `#${build.target}` : ''}` +
           ` platforms=${platforms.join(',') || '（本机）'}\n`,
       );
-      const result = buildOneVariant({ build, options, env, run: spawnSync, builder, workDir });
+
+      // Nothing was pushed in a dry run, so there is nothing to reuse.
+      if (options.push && !force && stagingComplete(staging, { env, run: spawnSync })) {
+        const refs = staging.map((entry) => entry.ref).join('、');
+        process.stdout.write(`    已存在 staging 镜像，跳过构建（DOCKER_FORCE_BUILD=1 可强制重建）：${refs}\n`);
+        state.results.push({
+          variant: build.variant,
+          builder: 'buildx',
+          digest: '',
+          platforms,
+          staging: staging.map((entry) => entry.ref),
+          tagNames: build.tagNames,
+          images: build.images,
+          skipped: true,
+        });
+        writeFileSync(statePath(env), JSON.stringify(state, null, 2));
+        continue;
+      }
+
+      const result = buildOneVariant({ build, options, env, run: spawnSync, builder, workDir, staging });
       state.results.push(result);
       writeFileSync(statePath(env), JSON.stringify(state, null, 2));
       process.stdout.write(`    完成：${result.digest || '(未取到 digest)'}\n`);
+      process.stdout.write(`    staging：${result.staging.join('、')}\n`);
     }
   } finally {
     if (createdBuilder) {
@@ -179,7 +242,11 @@ async function main() {
     }
   }
 
-  process.stdout.write(`\n完成：${state.results.length} 个变体${state.options.push && !state.dryRun ? '已推送' : '（未推送）'}\n`);
+  const built = state.results.filter((result) => !result.skipped).length;
+  process.stdout.write(
+    `\n构建完成：${state.results.length} 个变体（新建 ${built}、复用 ${state.results.length - built}）；` +
+      `${state.options.push && !state.dryRun ? '已推送到 staging，最终标签由 publish 作业发布' : '未推送'}\n`,
+  );
 }
 
 if (IS_DIRECT) {
