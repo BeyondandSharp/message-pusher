@@ -126,6 +126,9 @@ echo "==> 镜像：${IMAGE}"
 # 例如：APK_PROXY=https://your-apt-proxy ./build-image.sh
 APK_PROXY="${APK_PROXY-}"
 APT_PROXY="${APT_PROXY-}"
+# 同一个缓存服务通常同时代理 apt 与 apk；APK_PROXY 未单独设置时沿用 APT_PROXY（不是写死的默认值）
+APK_PROXY="${APK_PROXY:-${APT_PROXY}}"
+
 # Go 模块代理：默认走自建缓存代理；设为空字符串则用 Go 自带默认（proxy.golang.org）
 GOPROXY="${GOPROXY-}"
 
