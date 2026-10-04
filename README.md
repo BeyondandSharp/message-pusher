@@ -128,25 +128,35 @@ sudo service nginx restart
 ```
 
 ### 本地构建镜像
-改过代码后想自己构建镜像、并导出成可直接导入 Docker 的镜像文件，用仓库根目录的 `build-image-alpine.sh`（在仓库根目录执行）：
+改过代码后想自己构建镜像、并导出成可直接导入 Docker 的镜像文件，用仓库根目录的 `build-image.sh`（在仓库根目录执行）：
 
 ```shell
-./build-image-alpine.sh     # 前端和后端都在容器内的 Alpine 里编译，本机只要有 docker
+./build-image.sh                     # 默认 trixie 变体（运行时 Debian trixie）
+./build-image.sh --variant alpine    # alpine 变体（运行时 Alpine）
 ```
+
+两个变体与 CI 的发布变体一一对应，各自独立编译、互不共享产物：
+
+| 变体 | Dockerfile | 运行时 | 默认标签 |
+|---|---|---|---|
+| `trixie`（默认） | `Dockerfile.trixie` | Debian trixie（glibc） | `message-pusher:<版本>`，对应 `latest` |
+| `alpine` | `Dockerfile.alpine` | Alpine（musl） | `message-pusher:<版本>-alpine` |
 
 脚本选项：
 
 | 选项 | 说明 |
 |---|---|
-| `[镜像名[:标签]]` | 镜像名，默认 `message-pusher:<git describe 出来的版本>` |
+| `--variant NAME` | 构建哪个变体：`trixie`（默认）或 `alpine` |
+| `[镜像名[:标签]]` | 镜像名，默认按变体：`message-pusher:<版本>`（trixie）或 `message-pusher:<版本>-alpine`（alpine） |
 | `-o, --output-dir DIR` | 镜像文件输出目录，默认 `dist` |
 | `--no-save` | 只构建镜像，不导出镜像文件 |
 | `-h, --help` | 显示帮助 |
 
 ```shell
-./build-image-alpine.sh                          # 生成 dist/message-pusher_<版本>-<架构>.tar
-./build-image-alpine.sh message-pusher:v1        # 指定镜像名:标签
-./build-image-alpine.sh -o out --no-save         # 换输出目录，且只构建不导出
+./build-image.sh                                # 生成 dist/message-pusher_<版本>-<架构>.tar
+./build-image.sh --variant alpine               # alpine 变体
+./build-image.sh message-pusher:v1              # 指定镜像名:标签
+./build-image.sh -o out --no-save               # 换输出目录，且只构建不导出
 ```
 
 `<架构>` 由 `uname -m` 决定（`amd64` / `arm64`）。脚本最后会把镜像 `docker save` 成 tar 文件，
@@ -170,12 +180,12 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
 
 ```shell
 # 不用局域网缓存，走公网默认源
-APK_PROXY= APT_PROXY= GOPROXY= ./build-image-alpine.sh
+APK_PROXY= APT_PROXY= GOPROXY= ./build-image.sh
 
 # 换成其它代理 / npm 镜像
 GOPROXY=https://goproxy.cn,direct \
 NPM_REGISTRY=https://registry.npmmirror.com \
-./build-image-alpine.sh message-pusher:v1
+./build-image.sh message-pusher:v1
 ```
 
 ### 手动部署
@@ -728,4 +738,4 @@ send_message('标题', '描述', '**Markdown 内容**')
 ## 其他
 1. `v0.3` 之前的版本基于 Node.js，你可以切换到 [`nodejs`](https://github.com/BeyondandSharp/message-pusher/tree/nodejs) 分支查看，该版本不再有功能性更新。
 2. `v0.3` 以及后续版本基于 Gin Template [`v0.2.1`](https://github.com/songquanpeng/gin-template) 版本开发。
-3. 需要自行构建时，用仓库根目录的 `./build-image-alpine.sh` 构建镜像（前端与后端都在容器内编译，本机不需要 node / pnpm / go）。
+3. 需要自行构建时，用仓库根目录的 `./build-image.sh --variant alpine` 或 `./build-image.sh --variant trixie` 构建镜像（前端与后端都在容器内编译，本机不需要 node / pnpm / go）。

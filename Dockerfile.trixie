@@ -1,8 +1,12 @@
-# alpine 变体：运行时 Alpine（musl），与 Dockerfile.trixie（glibc）互为独立变体。
-# 前端（Node）和后端（Go）都在容器内编译，宿主机只需要有 docker。
-# 标签带 -alpine 后缀；默认变体（承载 latest）是 trixie。
+# trixie 变体：运行时是 Debian trixie（glibc），与 Dockerfile.alpine（musl）互为独立变体。
+# 前端（Node）和后端（Go）依旧都在容器内编译，宿主机只需要有 docker。
 #
-# 用法见同目录的 build-image.sh（--variant alpine）。
+# 为什么构建阶段仍用 Alpine：Go 侧是 CGO + 全静态链接的二进制，用 musl 工具链编译出来
+# 是真正自包含的（DNS 解析等都不依赖运行时库）；反过来若用 glibc 做静态链接，运行时的
+# DNS 解析要靠 dlopen，反而容易出现解析失败。所以这里只把**运行时**换成 Debian，
+# 二进制本身与 alpine 变体一致，两个变体各自独立构建、互不共享产物。
+#
+# 用法见同目录的 build-image.sh（--variant trixie）。
 
 # ---------------------------------------------------------------- 前端
 FROM node:24-alpine AS frontend
@@ -27,7 +31,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY web/ ./
 
-# 同 Dockerfile：清掉本机残留的前端产物，避免 Vite 把旧的 build/index.html 当成输入
+# 清掉本机残留的前端产物，避免 Vite 把旧的 build/index.html 当成输入
 RUN rm -rf build
 
 # Vite 在构建时把 import.meta.env.VITE_* 静态替换进产物，这里注入版本号（对应页脚的显示）
@@ -79,8 +83,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -ldflags "-s -w -X 'message-pusher/common.Version=${VERSION}' -extldflags '-static'" -o message-pusher
 
-# ---------------------------------------------------------------- 运行时
-FROM alpine:3.24
+# ---------------------------------------------------------------- 运行时（Debian trixie）
+FROM debian:trixie-slim
 
 ARG VERSION=dev
 ARG APK_PROXY=""
@@ -91,15 +95,15 @@ LABEL org.opencontainers.image.title="message-pusher" \
 ENV PORT=3000 \
     TZ=Asia/Shanghai
 
-# 同构建阶段：让运行时的包安装也走缓存代理
-RUN if [ -f /etc/apk/repositories ] && [ -n "${APK_PROXY}" ]; then \
-      sed -i "s|^https\?://|${APK_PROXY}/|" /etc/apk/repositories; \
-    fi; \
-    if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
+# 同构建阶段：让运行时的包安装也走缓存代理（本阶段只有 apt）
+RUN if [ -d /etc/apt/apt.conf.d ] && [ -n "${APT_PROXY}" ]; then \
       printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/99proxy; \
     fi
 
-RUN apk add --no-cache ca-certificates tzdata
+# Debian 官方镜像不带证书与时区数据；用 -trixie-slim 保持体积
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend /build/message-pusher /
 EXPOSE 3000
