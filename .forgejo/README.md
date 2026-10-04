@@ -76,15 +76,18 @@ workflow 里每一步都长这样（`配置里没有内嵌脚本`）：
 ```dockerfile
 # Dockerfile.alpine
 FROM node:24-alpine AS frontend
+ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /build/web
-RUN npm install -g pnpm
+RUN npm install -g pnpm --registry=${NPM_REGISTRY}
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --ignore-scripts
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --ignore-scripts --registry=${NPM_REGISTRY}
 COPY web/ ./
 RUN pnpm run build
 
 FROM golang:1.27-alpine AS backend
 ARG VERSION=dev
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 RUN apk add --no-cache build-base              # go-sqlite3 需要 CGO 工具链
 WORKDIR /build
 COPY go.mod go.sum ./
@@ -107,15 +110,18 @@ ENTRYPOINT ["/message-pusher"]
 ```dockerfile
 # Dockerfile.trixie（默认变体，承载 latest）
 FROM node:24-trixie AS frontend
+ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /build/web
-RUN npm install -g pnpm
+RUN npm install -g pnpm --registry=${NPM_REGISTRY}
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --ignore-scripts
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --ignore-scripts --registry=${NPM_REGISTRY}
 COPY web/ ./
 RUN pnpm run build
 
 FROM golang:1.27-trixie AS backend
 ARG VERSION=dev
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
@@ -151,7 +157,7 @@ ENTRYPOINT ["/message-pusher"]
 预发布版本（含 `-`）**不会**产出 `latest`，但 `alpine` / `trixie` 浮动标签仍会更新。
 非 semver 的 tag 默认被拒绝；确实需要时设 `DOCKER_ALLOW_ANY_TAG=true`（此时 `semver` 规则不产出，`ref`/`sha`/`raw` 照常）。
 
-**版本会自动作为 build arg 传入**：每次构建都带 `--build-arg VERSION=<本次版本>`，所以下面示例里的 `ARG VERSION` 直接可用，**不需要为它配置任何变量**。想自己控制就在 `DOCKER_BUILD_ARGS` 里写 `VERSION=...`，以你的为准。
+**运行期才知道的值会自动作为 build arg 传入**：每次构建都带 `--build-arg VERSION=<本次版本>`，以及（配了才会带的）`GOPROXY`、`NPM_REGISTRY`。所以下面示例里的 `ARG VERSION` / `ARG GOPROXY` / `ARG NPM_REGISTRY` 直接可用，**不需要为它们写 DOCKER_BUILD_ARGS**；想自己控制就在 `DOCKER_BUILD_ARGS` 里写同名项，以你的为准。
 
 ## 配置项
 
@@ -186,7 +192,64 @@ ENTRYPOINT ["/message-pusher"]
 | `DOCKER_PUSH` | tag 触发为 `true` | `false` 只构建不推送 |
 | `DOCKER_ALLOW_ANY_TAG` | 空 | `true` 允许非 semver tag |
 | `SKIP_TOOL_INSTALL` | 空 | `true` 关闭自动安装 docker/buildx |
-| `ALL_PROXY` / `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `APT_PROXY` / `APK_PROXY` / `YUM_PROXY` | 空 | 包管理器装 docker、以及 build 容器内走网时使用 |
+| 代理 / 镜像变量 | 空 | 见下面「代理、镜像与 registry」 |
+
+### 代理、镜像与 registry（内网怎么接）
+
+runner 没有直连外网时，先分清三件不同的事：**代理**（forward proxy）、**镜像/仓库**（repository）、**registry**。填错变量的典型症状是 `unable to select packages`、`HTTP 404/308`、`Connection refused`。变量名与用法和 [npm-publish](../npm-publish/README.md) **完全一致**，同一套内网配置两个 Action 都能直接用。
+
+**最省事的用法：只填下面这几个地址。**
+`APT_PROXY` / `NPM_PROXY` 的值可以是**真代理**，也可以是**内网镜像/registry**：`Ensure container tools` 会**探测一次**（取该地址自己的仓库索引 / `/-/ping`），再决定怎么用。
+
+| 变量 | 你填什么 | 判为**镜像 / registry** | 判为**代理** |
+| --- | --- | --- | --- |
+| `APT_PROXY` | Debian/Ubuntu 镜像根，如 `https://apt.internal` | 生成临时 sources（`<根>/debian` 或 `/ubuntu` + 镜像里的 codename）→ `apt-get -o Dir::Etc::sourcelist=…` 装 docker CLI | 作为 apt 的 `http_proxy`/`https_proxy` |
+| `NPM_PROXY` | 内网 npm registry，如 `https://npm.internal` | 构建时注入 `--build-arg NPM_REGISTRY=<url>`（Dockerfile 里写 `ARG NPM_REGISTRY` 即可给 `pnpm install --registry` 用） | 作为 npm 自己的 `proxy` 设置 |
+| `GOPROXY`（或 `GO_PROXY`） | Go module proxy（Athens 等） | 构建时注入 `--build-arg GOPROXY=<url>`（Dockerfile 里写 `ARG GOPROXY`） | — |
+
+判别规则：直接 GET 索引文件，**2xx = 镜像**；拿到明确的 HTTP 错误（404/400/308…）= 代理；**完全没有响应**（连不上/超时）= 仍按镜像处理 —— 那正是你填的地址，报错信息也更贴切。
+本 Action 自己**不跑 npm**（前端构建发生在 `docker build` 里），所以 `NPM_PROXY` 的判别结果是通过 build arg 传给构建的，而不是本地安装用。
+
+apk / yum 的镜像用这两个（显式指定，**不探测**；设了就优先于任何 `*_PROXY`）：
+
+| 变量 | 指向什么 |
+| --- | --- |
+| `APK_REPO` | Alpine 镜像**根地址或完整仓库 URL**（逗号分隔）：根地址会按镜像里的 `VERSION_ID` 展开成 `<根>/alpine/vX.Y/{main,community}` |
+| `YUM_REPO` | yum/dnf 镜像**根地址或完整 baseurl**（逗号分隔；根地址按 `VERSION_ID` 展开成 `<根>/centos/<N>-stream/{BaseOS,AppStream}/x86_64/os`）；生成 `.repo` 目录 + `--setopt=reposdir=`，镜像自带的 `/etc/pki/rpm-gpg/RPM-GPG-KEY*` 会写进 `gpgkey`（`gpgcheck=1`），一个密钥都没有时才降级为 `gpgcheck=0` 并在日志里说明。旧的 `APK_REPOSITORY` / `YUM_REPOSITORY` 仍可识别 |
+| `APK_PROXY` / `YUM_PROXY` | **已删除**：apk/yum 的镜像是仓库而不是代理，填到 `APK_REPO` / `YUM_REPO`；真要给它们配代理就用下面的通用变量 |
+
+**真正的 HTTP 转发代理**（它们只当代理，不做判别；BuildKit 会自动把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 转发进构建容器）：
+
+| 变量 | 作用 |
+| --- | --- |
+| `ALL_PROXY` | 通用兜底（`socks5://…` 也可以） |
+| `HTTP_PROXY` / `HTTPS_PROXY` | 标准 HTTP 代理 |
+| `NO_PROXY` | 不走代理的地址（如 `localhost,.internal`） |
+
+取值优先级（以 apt 为例）：`APT_PROXY`（判为代理时）→ `HTTP_PROXY`/`HTTPS_PROXY` → `ALL_PROXY`。变量会同时以大写和小写形式导出（`http_proxy`/`HTTP_PROXY`），因为不同工具认不同写法；`NO_PROXY` 也一样。
+
+想自己确认某个地址是哪一类：
+
+```bash
+curl -sI https://HOST/alpine/v3.24/main/x86_64/APKINDEX.tar.gz | head -1   # Alpine 镜像（分支带 v）
+curl -sI https://HOST/debian/dists/trixie/InRelease | head -1              # Debian/Ubuntu 镜像
+curl -s  https://HOST/-/ping                                               # npm registry <- 返回 {}
+curl -x http://HOST:PORT -o /dev/null -w '%{http_code}\n' https://registry-1.docker.io/v2/   # 代理
+```
+
+socks5 代理只能给 `ALL_PROXY`/`HTTP(S)_PROXY` 用，apt/apk 不能；内网源形式特殊（多组件、多 suite、非 CentOS 的 RPM 发行版）时，直接写进镜像的 `sources.list` / `.repo` 更省事。
+
+### 自动注入的 build arg
+
+`resolve` 会把运行期才知道的值作为 `--build-arg` 传进构建，**Dockerfile 里声明了 `ARG` 才会被消费**：
+
+| build arg | 来源 | 覆盖方式 |
+| --- | --- | --- |
+| `VERSION` | 本次 tag 的版本（去掉 `v` 前缀） | `DOCKER_BUILD_ARGS: VERSION=...` |
+| `GOPROXY` | 变量 `GOPROXY` 或 `GO_PROXY` | 同上 |
+| `NPM_REGISTRY` | 变量 `NPM_REGISTRY`（显式），或 `NPM_PROXY` 被判为 registry 的结果 | 同上 |
+
+三个值都为空时不会注入，命令行与本功能加入前完全一致；Dockerfile 没声明对应的 `ARG` 时会被忽略。
 
 ### `DOCKER_VARIANTS` 语法
 
@@ -275,7 +338,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 
 ## 首次使用需要在真实实例上确认的点
 
-本目录的代码在源仓库经过了 78 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
+本目录的代码在源仓库经过了 104 个用例的单元测试与假 docker 端到端（见下），但以下几项只有真实 Forgejo + runner + registry 才能确认，建议先 `dry_run: true` 演练一次：
 
 1. runner 是否能让 job 访问 Docker 守护进程（socket 挂载 + `valid_volumes`，或宿主机 runner）。
 2. `actions/checkout@v4` 在该实例是否可达。
@@ -286,7 +349,7 @@ for (const build of computeBuilds({ state })) console.log(build.variant.padEnd(7
 ## 测试
 
 ```bash
-node --test test/docker-*.test.mjs      # 本 Action 的 78 个用例
+node --test test/docker-*.test.mjs      # 本 Action 的 104 个用例
 node --test test/*.test.mjs test/npm-publish/*.test.mjs   # 本仓库全部用例
 ```
 

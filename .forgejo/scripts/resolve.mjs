@@ -20,6 +20,7 @@ import {
   registriesFrom,
   variantSelection,
 } from './config.mjs';
+import { goProxyFrom } from './deps.mjs';
 
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 
@@ -41,16 +42,32 @@ export const IS_DIRECT = (() => {
 })();
 
 /**
- * The version is a *runtime* value derived from the tag, so it cannot come from
- * a repository variable. It is injected as `--build-arg VERSION=<版本>` (what
- * people write by hand with the official trio: `build-args:
- * VERSION=${{ steps.meta.outputs.version }}`), which is what the example
- * Dockerfiles' `ARG VERSION` consumes. An explicit DOCKER_BUILD_ARGS entry for
- * VERSION wins, because that is the repository saying what it wants.
+ * Build arguments this Action can fill in by itself, because their values are
+ * known only at run time:
+ *
+ *   * `VERSION`      — the tag (what people write by hand with the official trio:
+ *                      `build-args: VERSION=${{ steps.meta.outputs.version }}`);
+ *   * `GOPROXY`      — `GOPROXY` / `GO_PROXY`, so a Dockerfile's `ARG GOPROXY`
+ *                      reaches an internal Athens without extra configuration;
+ *   * `NPM_REGISTRY` — an explicit `NPM_REGISTRY`, or the registry `ensure-tools`
+ *                      classified out of `NPM_PROXY` (it exports the verdict).
+ *
+ * An explicit `DOCKER_BUILD_ARGS` entry always wins, because that is the
+ * repository saying what it wants. Nothing is injected when the source variable
+ * is empty, so a repository that sets none of them sees exactly the same
+ * command line as before.
  */
-export function withVersionBuildArg(options, version) {
-  if (options.buildArgs.some((arg) => arg.key === 'VERSION')) return options;
-  return { ...options, buildArgs: [{ key: 'VERSION', value: String(version) }, ...options.buildArgs] };
+export function withDefaultBuildArgs(options, { version, env = process.env }) {
+  const candidates = [
+    ['VERSION', version],
+    ['GOPROXY', goProxyFrom(env)],
+    ['NPM_REGISTRY', readOptional(env.NPM_REGISTRY)],
+  ];
+  const injected = candidates
+    .filter(([key, value]) => value !== undefined && value !== null && String(value) !== '')
+    .filter(([key]) => !options.buildArgs.some((arg) => arg.key === key))
+    .map(([key, value]) => ({ key, value: String(value) }));
+  return { ...options, buildArgs: [...injected, ...options.buildArgs] };
 }
 
 export function stripTagPrefix(tag) {
@@ -143,7 +160,7 @@ export function resolveRelease(env = process.env, { variantsOverride } = {}) {
     variants,
     registries,
     images,
-    options: withVersionBuildArg(buildOptionsFrom(env, { dryRun }), version),
+    options: withDefaultBuildArgs(buildOptionsFrom(env, { dryRun }), { version, env }),
     builds: [],
     results: [],
   };

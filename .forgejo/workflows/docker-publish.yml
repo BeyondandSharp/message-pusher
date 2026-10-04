@@ -31,9 +31,10 @@
 #   DOCKER_CONTEXT, DOCKER_META_IMAGES, DOCKER_META_TAGS, DOCKER_META_FLAVOR,
 #   DOCKER_META_LABELS, DOCKER_BUILD_ARGS, DOCKER_PLATFORMS, DOCKER_CACHE_FROM,
 #   DOCKER_CACHE_TO, DOCKER_PULL, DOCKER_NO_CACHE, DOCKER_PROVENANCE,
-#   DOCKER_ALLOW_ANY_TAG, SKIP_TOOL_INSTALL, and the proxy variables
-#   (ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / APK_PROXY /
-#   YUM_PROXY).
+#   DOCKER_ALLOW_ANY_TAG, SKIP_TOOL_INSTALL, and the endpoint variables
+#   (ALL_PROXY / HTTP_PROXY / HTTPS_PROXY / NO_PROXY / APT_PROXY / NPM_PROXY /
+#   APK_REPO / YUM_REPO / APK_REPOSITORY / YUM_REPOSITORY / GOPROXY / GO_PROXY —
+#   see the env block below; APK_PROXY / YUM_PROXY no longer exist).
 #
 # Runner requirement: the job needs a reachable Docker daemon. A container job
 # reaches it only when the runner mounts the socket — see the README for the two
@@ -112,15 +113,33 @@ jobs:
       INPUT_VERSION: ${{ inputs.version }}
       INPUT_VARIANTS: ${{ inputs.variants }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
-      # Proxies: passed through for the package managers (ensure-tools) and for
-      # docker build, which forwards them into the build containers.
+      # Endpoint variables (the same model as npm-publish).
+      #   APT_PROXY / NPM_PROXY — the value may be a real forward proxy OR an
+      #     internal MIRROR/registry: ensure-tools probes it (does it serve its
+      #     own index?) and uses it accordingly — apt as a repository, npm as the
+      #     build's registry (injected as --build-arg NPM_REGISTRY), and only a
+      #     genuine proxy as a proxy.
+      #   The generic HTTP(S)_PROXY / ALL_PROXY are plain proxies for everything.
       ALL_PROXY: ${{ vars.ALL_PROXY }}
       HTTP_PROXY: ${{ vars.HTTP_PROXY }}
       HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
       NO_PROXY: ${{ vars.NO_PROXY }}
       APT_PROXY: ${{ vars.APT_PROXY }}
-      APK_PROXY: ${{ vars.APK_PROXY }}
-      YUM_PROXY: ${{ vars.YUM_PROXY }}
+      NPM_PROXY: ${{ vars.NPM_PROXY }}
+      # Explicit package mirrors (comma separated; a bare mirror root is fine —
+      # the distro paths come from the image's os-release). Setting one skips the
+      # probe entirely. apk/yum mirrors go here, not into a *_PROXY variable; the
+      # longer *_REPOSITORY names are still accepted. There is no APK_PROXY /
+      # YUM_PROXY any more.
+      APK_REPO: ${{ vars.APK_REPO }}
+      YUM_REPO: ${{ vars.YUM_REPO }}
+      APK_REPOSITORY: ${{ vars.APK_REPOSITORY }}
+      YUM_REPOSITORY: ${{ vars.YUM_REPOSITORY }}
+      # Go module proxy: passed into the build as --build-arg GOPROXY, so a
+      # Dockerfile that declares ARG GOPROXY reaches an internal Athens. GO_PROXY
+      # is accepted as the same thing.
+      GOPROXY: ${{ vars.GOPROXY || vars.GO_PROXY }}
+      GO_PROXY: ${{ vars.GO_PROXY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

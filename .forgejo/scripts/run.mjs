@@ -18,10 +18,11 @@
 //   summary            digest table
 
 import { spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  MANAGER_PROXY_VARS,
   OPTIONAL_TOOLS,
   REQUIRED_TOOLS,
   canInstall,
@@ -33,6 +34,9 @@ import {
   packagesFor,
   probeDocker,
   proxyEnv,
+  resolveEndpoint,
+  writeAptSources,
+  writeYumRepos,
 } from './deps.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -161,30 +165,53 @@ async function verifyAction(env) {
  */
 async function ensureTools(env) {
   const { spawnSync } = await import('node:child_process');
+
+  // NPM_PROXY may be a real proxy or an internal registry; classify it once and
+  // pass the verdict on, because the build consumes it as a build argument.
+  await resolveNpmEndpoint(env);
+
   const missing = missingTools(REQUIRED_TOOLS, spawnSync);
   const missingOptional = missingTools(OPTIONAL_TOOLS, spawnSync);
-  if (missing.length === 0 && missingOptional.length === 0) {
+  const wanted = [...missing, ...missingOptional];
+  if (wanted.length === 0) {
     process.stdout.write(`工具齐全（${[...REQUIRED_TOOLS, ...OPTIONAL_TOOLS].join(', ')}），无需安装\n`);
     return 0;
   }
-  process.stdout.write(`缺少工具：${[...missing, ...missingOptional].join(', ')}\n`);
+  process.stdout.write(`缺少工具：${wanted.join(', ')}\n`);
 
   const manager = detectPackageManager(env, spawnSync);
   if (!manager) {
     process.stderr.write('没有可用的包管理器（apk/apt-get/yum），请改用自带 docker 的 runner\n');
     return 0;
   }
-  const packages = packagesFor(manager, [...missing, ...missingOptional]);
-  const proxy = proxyEnv(manager, env);
-  const proxyNote = Object.keys(proxy).length > 0 ? `（代理：${Object.keys(proxy).join(', ')}）` : '（未配置代理）';
-  process.stdout.write(`使用 ${manager} 安装：${packages.join(', ')} ${proxyNote}\n`);
+  const packages = packagesFor(manager, wanted);
+
+  // A `*_PROXY` value may be a mirror rather than a proxy: resolveEndpoint probes
+  // it once (does it serve its own repository index?) and the answer decides
+  // whether apt gets a generated sources file or a proxy setting.
+  const plan = await resolveEndpoint(manager, env);
+  if (plan.source === 'proxy-as-mirror') {
+    process.stdout.write(`${managerEndpointVar(manager)} 指向的是镜像（探测到仓库索引），按仓库使用\n`);
+  }
+  const repositories = plan.mirror;
+  const proxy = proxyEnv(manager, env, { explicit: plan.proxy });
+  const aptSourcesFile = manager === 'apt-get' ? writeAptSources(repositories, env) : '';
+  const yumReposDir = isYumFamily(manager)
+    ? writeYumRepos(repositories, env, { warn: (message) => process.stderr.write(`${message}\n`) })
+    : '';
+  const resolved = { repositories, aptSourcesFile, yumReposDir };
+
+  const proxyNote =
+    Object.keys(proxy).length > 0 ? `（代理：${plan.proxy || Object.keys(proxy).join(', ')}）` : '（未配置代理）';
+  const repoNote = repositories.length > 0 ? `（附加仓库：${repositories.join(', ')}）` : '';
+  process.stdout.write(`使用 ${manager} 安装：${packages.join(', ')} ${proxyNote}${repoNote}\n`);
 
   if (!canInstall(env)) {
-    process.stderr.write(`不是 root 且没有 sudo，跳过安装；请手动执行：${installHint(manager, packages)}\n`);
+    process.stderr.write(`不是 root 且没有 sudo，跳过安装；请手动执行：${installHint(manager, packages, env, resolved)}\n`);
     return 0;
   }
 
-  const result = installTools({ manager, tools: [...missing, ...missingOptional], env });
+  const result = installTools({ manager, tools: wanted, env, proxy, ...resolved });
   const stillRequired = missingTools(REQUIRED_TOOLS, spawnSync);
   const stillOptional = missingTools(OPTIONAL_TOOLS, spawnSync);
   if (stillRequired.length === 0) {
@@ -192,15 +219,62 @@ async function ensureTools(env) {
     return 0;
   }
   process.stderr.write(`docker 仍不可用（尝试过：${result.attempts.join(' | ') || '无'}）\n`);
-  process.stderr.write(`请手动执行：${installHint(manager, packages)}\n`);
+  process.stderr.write(`请手动执行：${installHint(manager, packages, env, resolved)}\n`);
   return 0;
 }
 
+/** The `*_PROXY` variable that names this manager's endpoint, for log lines. */
+export function managerEndpointVar(manager) {
+  return (MANAGER_PROXY_VARS[manager] || [])[0] || `${String(manager).toUpperCase()}_PROXY`;
+}
+
+function isYumFamily(manager) {
+  return manager === 'yum' || manager === 'dnf' || manager === 'microdnf';
+}
+
+/** Make a resolved value visible to the following workflow steps. */
+function exportEnv(key, value) {
+  process.env[key] = value;
+  const file = process.env.GITHUB_ENV;
+  if (!file) return;
+  try {
+    appendFileSync(file, `${key}=${value}\n`);
+  } catch {
+    /* the value still applies to this process */
+  }
+}
+
+/**
+ * Decide what `NPM_PROXY` means and pass the verdict on.
+ *
+ * A registry mirror is handed to the build as `--build-arg NPM_REGISTRY=…`
+ * (resolve.mjs adds it), which is what a Dockerfile's `ARG NPM_REGISTRY` — the
+ * knob our example Dockerfiles use for `pnpm install --registry` — consumes. A
+ * real proxy becomes npm's own proxy setting.
+ *
+ * This Action never runs npm itself (the frontend build happens inside
+ * `docker build`), so the verdict is exported rather than used directly here.
+ */
+async function resolveNpmEndpoint(env) {
+  const plan = await resolveEndpoint('npm', env);
+  if (plan.source === 'proxy-as-mirror') {
+    exportEnv('NPM_REGISTRY', plan.mirror[0]);
+    process.stdout.write(`NPM_PROXY 指向的是 registry：构建将使用 --build-arg NPM_REGISTRY=${plan.mirror[0]}\n`);
+  } else if (plan.source === 'proxy') {
+    exportEnv('NPM_CONFIG_PROXY', plan.proxy);
+    process.stdout.write(`NPM_PROXY 指向的是代理：npm 将使用 ${plan.proxy}\n`);
+  }
+}
+
 /** The command a human would run, for log messages. */
-export function installHint(manager, packages) {
-  const built = installCommand(manager, packages);
+export function installHint(manager, packages, env = process.env, resolved = {}) {
+  const built = installCommand(manager, packages, {
+    repositories: resolved.repositories ?? [],
+    aptSourcesFile: resolved.aptSourcesFile ?? '',
+    yumReposDir: resolved.yumReposDir ?? '',
+  });
   if (!built) return `用 ${manager} 安装 ${packages.join(' ')}`;
-  return [...commandPrefix(), built[0], ...built[1]].join(' ');
+  return [...commandPrefix(env), built[0], ...built[1]].join(' ');
 }
 
 export async function dispatch(name, env = process.env) {
