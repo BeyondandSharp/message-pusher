@@ -23,7 +23,7 @@ import {
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderTimestamp } from '../helpers/render';
 import { Link } from 'react-router-dom';
-import { marked } from 'marked';
+import { renderMarkdown } from '../helpers/markdown';
 
 // 列表自动刷新的间隔（秒）。默认 60 秒：消息推送流（SSE）已经能实时推新消息，
 // 原来的 10 秒一次在服务端 60 次/3 分钟的限流下（多标签页时）很容易触发 429。
@@ -535,7 +535,7 @@ const MessagesTable = () => {
         {message.content ? (
           <div
             dangerouslySetInnerHTML={{
-              __html: marked.parse(message.content),
+              __html: renderMarkdown(message.content),
             }}
           ></div>
         ) : (
