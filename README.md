@@ -265,8 +265,8 @@ proxy_send_timeout 300s;
    + 将上面的 `<domain>` 以及 `<username>` 替换为真实值，例如：`https://push.mydomain.cn/push/admin`
 2. `GET` 请求方式：`https://<domain>/push/<username>?title=<标题>&description=<描述>&content=<Markdown 文本>&channel=<推送方式>&token=<推送 token>`
    1. `title`：选填，受限于具体的消息推送方式，其可能被忽略。
-   2. `description`：必填，可以替换为 `desp`。
-   3. `content`：选填，受限于具体的消息推送方式，Markdown 语法的支持有所区别。
+   2. `description`：必填，可以替换为 `short`。
+   3. `content`：选填，可以替换为 `desp`，受限于具体的消息推送方式，Markdown 语法的支持有所区别。
    4. `channel`：选填，如果不填则系统使用你在后台设置的默认推送通道。注意，此处填的是消息通道的名称，而非类型。可选的推送通道类型有：
       1. `email`：通过发送邮件的方式进行推送（使用 `title` 或 `description` 字段设置邮件主题，使用 `content` 字段设置正文，支持完整的 Markdown 语法）。
       2. `test`：通过微信测试号进行推送（使用 `description` 字段设置模板消息内容，不支持 Markdown）。
@@ -321,6 +321,34 @@ proxy_send_timeout 300s;
 注意：
 1. 对于大部分通道，`description` 字段和 `content` 是不能同时存在的，如果你只需要文字消息，请使用 `description` 字段，如果你需要发送 Markdown 消息，请使用 `content` 字段。
 2. 部分通道的 Markdown 支持实际上是通过 URL 跳转到本系统所渲染的消息详情实现的，其他通道的 Markdown 支持受限于具体的通道，支持的语法并不统一。
+3. 字段别名：`short` 等价于 `description`，`desp` 等价于 `content`，`openid` 等价于 `to`。
+
+**接口（Webhook）规则说明：**
+
+在「接口」页面创建的 Webhook 会按「提取规则 → 构建规则」的顺序把入站请求转换成一条消息：
+
+1. **提取规则**：一个 JSON 对象，键是模板变量名，值是该请求体里的取值路径（用 gjson，数组下标写成 `.0.`），例如：
+   ```json
+   {
+     "to": "imoke_email",
+     "title": "alerts.0.labels.alertname",
+     "content": "alerts.0.annotations.description"
+   }
+   ```
+   这里左边只是变量名，右边才是取值路径，所以 `"to": "imoke_email"` 这类写法是成立的。
+2. **构建规则**：一个 JSON 对象，**键固定为 `title` / `description` / `content` / `url` / `to`**（与消息字段一一对应，其它键会被忽略）。值可以：
+   + 直接写字符串，用 `$变量名` 引用提取规则里的变量（注意是 `$VAR`，不是 `${VAR}`）；
+   + 写成 JSON 对象或数组（例如飞书卡片模板），嵌套在其中的 `$变量名` 同样会被替换。
+   ```json
+   {
+     "to": "$to",
+     "content": {
+       "type": "template",
+       "data": { "template_variable": { "title": "$title" } }
+     }
+   }
+   ```
+   只有 `to` 会被传给消息的接收者字段，自定义消息通道的请求体里可以用 `$to` 引用它；其它自定义字段（例如 `agentid`）不会进入消息，请直接写死在自定义通道的请求体里。
 
 **飞书消息类型（`msg_type`）：**
 

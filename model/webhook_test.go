@@ -26,6 +26,7 @@ func TestRenderWebhookConstructRule(t *testing.T) {
 		wantTitle       string
 		wantDesc        string
 		wantURL         string
+		wantTo          string
 		wantContent     string
 		wantContentJSON string // 非空时按 JSON 结构比较 content，否则按字符串精确比较
 		wantErr         bool
@@ -114,6 +115,22 @@ func TestRenderWebhookConstructRule(t *testing.T) {
 			wantContent: "$unknown",
 		},
 		{
+			name: "to 字段会被渲染（Webhook 指定接收者）",
+			rule: `{"to": "$to", "content": "内容：$content"}`,
+			variables: map[string]string{
+				"to":      "imoke_email",
+				"content": "正文",
+			},
+			wantTo:      "imoke_email",
+			wantContent: "内容：正文",
+		},
+		{
+			name:      "to 支持非字符串结构（序列化为 JSON）",
+			rule:      `{"to": {"all": true}}`,
+			variables: map[string]string{},
+			wantTo:    `{"all":true}`,
+		},
+		{
 			name:            "数字与布尔值保持类型",
 			rule:            `{"content": {"count": 1234567890123456789, "ok": true}}`,
 			variables:       map[string]string{},
@@ -151,6 +168,9 @@ func TestRenderWebhookConstructRule(t *testing.T) {
 			}
 			if got := WebhookConstructRuleString(rule.URL); got != tt.wantURL {
 				t.Fatalf("url 不匹配：got %q, want %q", got, tt.wantURL)
+			}
+			if got := WebhookConstructRuleString(rule.To); got != tt.wantTo {
+				t.Fatalf("to 不匹配：got %q, want %q", got, tt.wantTo)
 			}
 			gotContent := WebhookConstructRuleString(rule.Content)
 			if tt.wantContentJSON != "" {

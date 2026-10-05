@@ -123,6 +123,12 @@ func SendWeChatCorpMessage(message *model.Message, user *model.User, channel_ *m
 	if message.To != "" {
 		messageRequest.ToUser = message.To
 	}
+	// 文字卡片的链接优先用推送时传入的 url，未指定时才回退到服务地址，
+	// 否则用户填写的详情链接会被服务首页覆盖（见上游 issue #144）。
+	detailURL := message.URL
+	if detailURL == "" {
+		detailURL = common.ServerAddress
+	}
 	if message.Content == "" {
 		if message.Title == "" {
 			messageRequest.MessageType = "text"
@@ -131,14 +137,14 @@ func SendWeChatCorpMessage(message *model.Message, user *model.User, channel_ *m
 			messageRequest.MessageType = "textcard"
 			messageRequest.TextCard.Title = message.Title
 			messageRequest.TextCard.Description = message.Description
-			messageRequest.TextCard.URL = common.ServerAddress
+			messageRequest.TextCard.URL = detailURL
 		}
 	} else {
 		if clientType == "plugin" {
 			messageRequest.MessageType = "textcard"
 			messageRequest.TextCard.Title = message.Title
 			messageRequest.TextCard.Description = message.Description
-			messageRequest.TextCard.URL = message.URL
+			messageRequest.TextCard.URL = detailURL
 		} else {
 			messageRequest.MessageType = "markdown"
 			messageRequest.Markdown.Content = message.Content

@@ -69,6 +69,20 @@ func GetChannelByName(name string, userId int) (*Channel, error) {
 	return &c, err
 }
 
+// ChannelNameExists 判断同一用户下是否已存在同名通道。
+// 提前判断是为了给出友好提示，而不是把数据库唯一约束错误直接抛给用户。
+func ChannelNameExists(name string, userId int) (bool, error) {
+	if name == "" || userId == 0 {
+		return false, errors.New("name 或 userId 为空！")
+	}
+	var count int64
+	err := DB.Model(&Channel{}).Where("name = ? and user_id = ?", name, userId).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func GetTokenStoreChannels() (channels []*Channel, err error) {
 	err = DB.Where("type in ?", []string{TypeWeChatCorpAccount, TypeWeChatTestAccount}).Find(&channels).Error
 	return channels, err

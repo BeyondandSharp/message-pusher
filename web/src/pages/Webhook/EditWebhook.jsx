@@ -241,7 +241,7 @@ const EditWebhook = () => {
           <FormGroup>
             <Form.Item label='构建规则'>
               <CodeEditor
-                placeholder='在此输入构建规则，键为 title / description / content / url；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
+                placeholder='在此输入构建规则，键为 title / description / content / url / to（to 用于指定接收者，自定义通道里可用 $to 引用）；值可以引用模板变量（格式为 $VAR），也可以写成 JSON 对象或数组（例如飞书卡片），嵌套在其中的变量同样会被替换'
                 value={inputs.construct_rule}
                 language='json'
                 minHeight={200}

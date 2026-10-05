@@ -123,6 +123,21 @@ func AddChannel(c *gin.Context) {
 		})
 		return
 	}
+	nameExists, err := model.ChannelNameExists(channel_.Name, c.GetInt("id"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "检查通道名称失败：" + err.Error(),
+		})
+		return
+	}
+	if nameExists {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "通道名称已存在，请换一个名称",
+		})
+		return
+	}
 	cleanChannel := model.Channel{
 		Type:        channel_.Type,
 		UserId:      c.GetInt("id"),
@@ -197,6 +212,23 @@ func UpdateChannel(c *gin.Context) {
 		cleanChannel.Status = channel_.Status
 	} else {
 		// If you add more fields, please also update channel_.Update()
+		if channel_.Name != oldChannel.Name {
+			nameExists, checkErr := model.ChannelNameExists(channel_.Name, userId)
+			if checkErr != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "检查通道名称失败：" + checkErr.Error(),
+				})
+				return
+			}
+			if nameExists {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "通道名称已存在，请换一个名称",
+				})
+				return
+			}
+		}
 		cleanChannel.Type = channel_.Type
 		cleanChannel.Name = channel_.Name
 		cleanChannel.Description = channel_.Description

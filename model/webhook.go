@@ -17,6 +17,7 @@ type WebhookConstructRule struct {
 	Description interface{} `json:"description"`
 	Content     interface{} `json:"content"`
 	URL         interface{} `json:"url"`
+	To          interface{} `json:"to"`
 }
 
 // WebhookConstructRuleString 把构建规则中的字段值转换为消息字段所需的字符串。
@@ -53,6 +54,7 @@ func RenderWebhookConstructRule(constructRule string, variables map[string]strin
 	rule.Description = replaceWebhookVariables(rule.Description, pairs)
 	rule.Content = replaceWebhookVariables(rule.Content, pairs)
 	rule.URL = replaceWebhookVariables(rule.URL, pairs)
+	rule.To = replaceWebhookVariables(rule.To, pairs)
 	return rule, nil
 }
 

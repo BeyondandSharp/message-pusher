@@ -121,18 +121,24 @@ func pushMessageHelper(c *gin.Context, message *model.Message) {
 	processMessage(c, message, &user, true)
 }
 
+// authMessage 判断本次推送的令牌是否通过鉴权。
+//
+// 语义：用户维度令牌（全局）可以鉴权任意通道，通道维度令牌只能鉴权该通道；
+// 只要用户或通道任意一侧设置了令牌，本次请求就必须携带并命中其中一个，
+// 两侧都没有设置时才免鉴权。
 func authMessage(messageToken string, userToken string, channelToken *string) bool {
-	if userToken != "" {
-		if messageToken == userToken {
-			return true
-		}
+	hasUserToken := userToken != ""
+	hasChannelToken := channelToken != nil && *channelToken != ""
+	if !hasUserToken && !hasChannelToken {
+		return true
 	}
-	if channelToken != nil && *channelToken != "" {
-		if messageToken != *channelToken {
-			return false
-		}
+	if hasUserToken && messageToken == userToken {
+		return true
 	}
-	return true
+	if hasChannelToken && messageToken == *channelToken {
+		return true
+	}
+	return false
 }
 
 func processMessage(c *gin.Context, message *model.Message, user *model.User, needAuth bool) {
