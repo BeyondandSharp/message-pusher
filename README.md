@@ -14,14 +14,9 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
   <a href="https://raw.githubusercontent.com/BeyondandSharp/message-pusher/main/LICENSE">
     <img src="https://img.shields.io/github/license/BeyondandSharp/message-pusher?color=brightgreen" alt="license">
   </a>
-  <a href="https://github.com/BeyondandSharp/message-pusher/releases/latest">
-    <img src="https://img.shields.io/github/v/release/BeyondandSharp/message-pusher?color=brightgreen&include_prereleases" alt="release">
-  </a>
-  <a href="https://github.com/BeyondandSharp/message-pusher/releases/latest">
-    <img src="https://img.shields.io/github/downloads/BeyondandSharp/message-pusher/total?color=brightgreen&include_prereleases" alt="release">
-  </a>
-  <a href="https://goreportcard.com/report/github.com/BeyondandSharp/message-pusher">
-    <img src="https://goreportcard.com/badge/github.com/BeyondandSharp/message-pusher" alt="GoReportCard">
+  <img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/BeyondandSharp/message-pusher?label=GitHub%20Tag">
+  <a href="https://hub.docker.com/r/beyondandsharp/message-pusher">
+    <img alt="Docker Image Version (tag)" src="https://img.shields.io/docker/v/beyondandsharp/message-pusher/alpine?label=Docker%20Tag">
   </a>
 </p>
 
@@ -74,11 +69,11 @@ _✨ 搭建专属于你的消息推送服务，支持多种消息推送方式，
 
 ## 部署
 ### 通过 Docker 部署
-部署：`docker run -d --restart always --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v "$(pwd)/data:/data ghcr.io/beyondandsharp/message-pusher`
+部署：
+```
+docker run -d --restart unless-stopped --name message-pusher -p 3000:3000 -e TZ=Asia/Shanghai -v "$(pwd)/data:/data beyondandsharp/message-pusher:alpine
+```
 
-打 tag 后，`docker-image-amd64` / `docker-image-arm64` 两个 workflow 会自动构建并推送镜像到 GHCR：`ghcr.io/<你的 GitHub 用户名>/message-pusher`。
-
-更新：`docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR`
 
 开放的端口号为 3000，之后用 Nginx 配置域名，反代以及 SSL 证书即可，具体参考[详细部署教程](https://iamazing.cn/page/how-to-deploy-a-website)。
 
@@ -113,18 +108,6 @@ server{
           proxy_cache_bypass $http_upgrade;
    }
 }
-```
-
-之后使用 Let's Encrypt 的 certbot 配置 HTTPS：
-```bash
-# Ubuntu 安装 certbot：
-sudo snap install --classic certbot
-sudo ln -s /snap/bin/certbot /usr/bin/certbot
-# 生成证书 & 修改 Nginx 配置
-sudo certbot --nginx
-# 根据指示进行操作
-# 重启 Nginx
-sudo service nginx restart
 ```
 
 ### 本地构建镜像
@@ -199,17 +182,6 @@ GOPROXY=https://goproxy.cn,direct \
 NPM_PROXY=https://registry.npmmirror.com \
 ./build-image.sh message-pusher:v1
 ```
-
-### 手动部署
-1. 从 [GitHub Releases](https://github.com/BeyondandSharp/message-pusher/releases/latest) 下载对应平台的可执行文件：
-2. 运行：
-   ```shell
-   chmod u+x message-pusher
-   ./message-pusher --port 3000 --log-dir ./logs
-   ```
-3. 访问 [http://localhost:3000/](http://localhost:3000/) 并登录。初始账号用户名为 `root`，密码为 `123456`。
-
-如果服务需要长久运行，只是单纯地启动是不够的，[详细部署教程](https://iamazing.cn/page/how-to-deploy-a-website)。
 
 ### 注意
 如果需要使用 WebSocket 客户端推送功能，则 Nginx 的配置文件中 `proxy_read_timeout` 和 `proxy_send_timeout` 务必设置超过 1 分钟。
