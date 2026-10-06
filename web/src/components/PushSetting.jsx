@@ -120,12 +120,16 @@ const PushSetting = () => {
                 </Space.Compact>
               </Form.Item>
             </FormGroup>
-            <Button onClick={() => submit('general')} loading={loading}>
-              保存
-            </Button>
-            <Button onClick={() => testChannel(user.username, user.token, '')}>
-              测试
-            </Button>
+            <Space size={12}>
+              <Button onClick={() => submit('general')} loading={loading}>
+                保存
+              </Button>
+              <Button
+                onClick={() => testChannel(user.username, user.token, '')}
+              >
+                测试
+              </Button>
+            </Space>
           </Form>
         </Spin>
       </Col>
