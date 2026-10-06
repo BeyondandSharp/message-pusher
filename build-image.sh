@@ -20,8 +20,11 @@
 #
 # 三类包下载代理全部通过环境变量传入，都没有默认值；不设置就走各语言的官方源：
 #   APK_PROXY / APK_REPO / APT_PROXY   apk / apt 包缓存代理（改写容器内仓库地址）
+#   YUM_REPO                yum/dnf 仓库（Dockerfile 声明了 ARG YUM_REPO 时才生效）
 #   GOPROXY                 Go 模块代理（不设置则用 Go 官方代理 proxy.golang.org）
 #   NPM_PROXY / NPM_REGISTRY  前端 npm registry（不设置则用官方源）
+#   HTTP_PROXY / HTTPS_PROXY / NO_PROXY / ALL_PROXY  真代理：显式作为 --build-arg 转发
+#     （docker CLI 只从 ~/.docker/config.json 自动补代理 build arg，不读自己的环境变量）
 # 例如：NPM_PROXY=https://registry.npmmirror.com ./build-image.sh
 
 set -euo pipefail
@@ -136,10 +139,25 @@ APK_PROXY="${APK_PROXY:-${APK_REPO:-${APT_PROXY}}}"
 # Go 模块代理：未设置则用 Go 自带默认（proxy.golang.org）
 GOPROXY="${GOPROXY-}"
 
+# yum/dnf 仓库：本仓库的两个 Dockerfile 都没有 dnf/yum 步骤，仅在自定义
+# Dockerfile 声明了 ARG YUM_REPO 时才需要；未设置就不传这个 build arg。
+YUM_REPO="${YUM_REPO-}"
+
 BUILD_ARGS=(--build-arg "VERSION=${VERSION}" \
             --build-arg "APK_PROXY=${APK_PROXY}" \
             --build-arg "APT_PROXY=${APT_PROXY}" \
             --build-arg "GOPROXY=${GOPROXY}")
+if [[ -n "${YUM_REPO}" ]]; then
+  BUILD_ARGS+=(--build-arg "YUM_REPO=${YUM_REPO}")
+fi
+# 真代理：显式转发给构建容器。docker CLI 只会从 ~/.docker/config.json 的
+# proxies 自动补代理 build arg，不会读自己的环境变量，所以必须自己传。
+for proxy_name in HTTP_PROXY HTTPS_PROXY NO_PROXY ALL_PROXY; do
+  proxy_value="${!proxy_name-}"
+  if [[ -n "${proxy_value}" ]]; then
+    BUILD_ARGS+=(--build-arg "${proxy_name}=${proxy_value}")
+  fi
+done
 # 兼容两种命名：NPM_REGISTRY（文档里用的）与 NPM_PROXY
 NPM_REGISTRY="${NPM_REGISTRY:-${NPM_PROXY:-}}"
 if [[ -n "${NPM_REGISTRY}" ]]; then

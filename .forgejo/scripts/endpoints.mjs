@@ -26,9 +26,12 @@ import { existsSync, readFileSync } from 'node:fs';
 export const PROXY_VARS = ['ALL_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'APT_PROXY'];
 
 /**
- * The `*_PROXY` variable that names a manager's endpoint. Only apt and npm have
- * one: apk/yum have no repository variable here because the Action never
- * installs packages, and the apk build argument is derived from the apt mirror.
+ * The `*_PROXY` variable that names a manager's endpoint for *build-arg
+ * classification*. Only apt and npm are classified here: `APK_REPO` / `YUM_REPO`
+ * are explicit repositories (never probed) and the apk build argument is derived
+ * from the apt mirror. The job container's own package installs do not go through
+ * this classification at all — the workflow bootstrap and `prepare` rewrite the
+ * container's sources directly from `APK_REPO` / `APT_PROXY` / `YUM_REPO`.
  */
 export const MANAGER_PROXY_VARS = {
   'apt-get': ['APT_PROXY'],

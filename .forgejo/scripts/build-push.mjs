@@ -51,11 +51,27 @@ export function labelArgs(labels = {}) {
   return Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
 }
 
-export function buildxCreateArgv(name, image = '') {
+/**
+ * Proxy variables BuildKit accepts as predefined build args. They must be passed
+ * explicitly: the CLI only auto-populates proxy *build args* from its own
+ * `~/.docker/config.json` (`proxies`), never from its environment, so a job env
+ * carrying HTTP_PROXY alone would not reach a `RUN` step.
+ */
+export const PROXY_BUILD_ARGS = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY'];
+
+/** The proxy variables actually present in the environment, in a stable order. */
+export function proxiesFrom(env = {}) {
+  return PROXY_BUILD_ARGS.map((key) => [key, readOptional(env[key])]).filter(([, value]) => value !== '');
+}
+
+export function buildxCreateArgv(name, image = '', env = {}) {
   const argv = ['buildx', 'create', '--use', '--name', name, '--driver', 'docker-container'];
   // An internal registry mirror can be named with DOCKER_BUILDKIT_IMAGE: the
   // builder container is where BuildKit itself is pulled from.
   if (readOptional(image)) argv.push('--driver-opt', `image=${readOptional(image)}`);
+  // buildkitd pulls the base images itself, so it needs the proxies in its own
+  // environment; `env.*` is the docker-container driver option that sets it.
+  for (const [key, value] of proxiesFrom(env)) argv.push('--driver-opt', `env.${key}=${value}`);
   return argv;
 }
 
@@ -71,9 +87,14 @@ export function buildxRemoveArgv(name) {
  * (`VERSION`, `GOPROXY`, …) and what the repository wrote in `DOCKER_BUILD_ARGS`,
  * which is the more explicit statement of intent.
  */
-export function effectiveBuildArgs(build, options) {
+export function effectiveBuildArgs(build, options, env = {}) {
   const merged = new Map();
   for (const arg of build.buildArgs || []) merged.set(arg.key, arg);
+  // Proxies sit under both the variant table and `DOCKER_BUILD_ARGS`: an explicit
+  // `--build-arg` always wins over the ambient proxy.
+  for (const [key, value] of proxiesFrom(env)) {
+    if (!merged.has(key)) merged.set(key, { key, value });
+  }
   for (const arg of options.buildArgs || []) merged.set(arg.key, arg);
   return [...merged.values()];
 }
@@ -89,7 +110,7 @@ export function effectiveBuildArgs(build, options) {
  * first publishes, the second validates the build without touching the image
  * store, which is what a dry run wants.
  */
-export function buildxArgv({ build, options, metadataFile, builder = '', images = null }) {
+export function buildxArgv({ build, options, metadataFile, builder = '', images = null, env = {} }) {
   const argv = ['buildx', 'build'];
   if (builder) argv.push('--builder', builder);
   argv.push('--file', build.dockerfile);
@@ -101,7 +122,7 @@ export function buildxArgv({ build, options, metadataFile, builder = '', images 
   // docker-container builder; a multi-platform one does (see main()).
   const platforms = platformsFor(build, options);
   if (platforms.length > 0) argv.push('--platform', platforms.join(','));
-  for (const { key, value } of effectiveBuildArgs(build, options)) argv.push('--build-arg', `${key}=${value}`);
+  for (const { key, value } of effectiveBuildArgs(build, options, env)) argv.push('--build-arg', `${key}=${value}`);
   // Attestations are always off: they add manifest entries some registries and
   // clients still choke on, and this Action has no knob for them.
   argv.push('--provenance=false');
@@ -148,7 +169,7 @@ export function stagingComplete(refs = [], deps = {}) {
 
 function buildOneVariant({ build, options, env, run, builder, workDir, staging }) {
   const metadataFile = join(workDir, `metadata-${build.variant}.json`);
-  const result = runDocker(buildxArgv({ build, options, metadataFile, builder, images: staging }), { run, env });
+  const result = runDocker(buildxArgv({ build, options, metadataFile, builder, images: staging, env }), { run, env });
   if (result.status !== 0) throw new Error(`变体 ${build.variant} 构建失败（docker buildx build 退出码 ${result.status}）`);
 
   let digest = '';
@@ -198,7 +219,7 @@ async function main() {
 
   try {
     if (builder) {
-      const created = runDocker(buildxCreateArgv(builder, env.DOCKER_BUILDKIT_IMAGE), { run: spawnSync, env });
+      const created = runDocker(buildxCreateArgv(builder, env.DOCKER_BUILDKIT_IMAGE, env), { run: spawnSync, env });
       if (created.status !== 0) throw new Error(`创建 buildx builder 失败（${builder}）`);
       createdBuilder = true;
     }

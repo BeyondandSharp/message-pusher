@@ -142,6 +142,19 @@ jobs:
       # Unused by the default mode; here so the parallel mode is a one-line change:
       #   matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
       matrix: ${{ steps.plan.outputs.matrix }}
+    env:
+      # Same package-source and proxy variables as the build/publish jobs: the
+      # bootstrap rewrites the container's package sources from them before it
+      # installs node/git.
+      ALL_PROXY: ${{ vars.ALL_PROXY }}
+      HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+      HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
+      NO_PROXY: ${{ vars.NO_PROXY }}
+      APT_PROXY: ${{ vars.APT_PROXY }}
+      APK_REPO: ${{ vars.APK_REPO }}
+      YUM_REPO: ${{ vars.YUM_REPO }}
+      NPM_PROXY: ${{ vars.NPM_PROXY }}
+      GOPROXY: ${{ vars.GOPROXY }}
     timeout-minutes: 15
     steps:
       # The workbench image has docker + buildx + git, but no node, and every
@@ -149,6 +162,34 @@ jobs:
       # own package manager; every orchestration job carries this same block.
       - name: Bootstrap job container
         run: |
+          # The container's own package installs honour the repository variables,
+          # using the same convention as the Dockerfiles: APK_REPO / APT_PROXY /
+          # YUM_REPO are repository roots, a forward proxy goes through
+          # HTTP(S)_PROXY. Every rewrite is grep-guarded, so the same ones in
+          # prepare (which runs later, with node) are a no-op instead of a
+          # doubled prefix.
+          if [ -n "${APK_REPO:-}" ] && [ -f /etc/apk/repositories ]; then
+            grep -q "^${APK_REPO}/" /etc/apk/repositories || \
+              sed -i "s|^https\?://|${APK_REPO}/|" /etc/apk/repositories
+          fi
+          if [ -n "${APT_PROXY:-}" ] && [ -d /etc/apt ]; then
+            if ! grep -rqs -e "URIs: ${APT_PROXY}/" -e "^deb ${APT_PROXY}/" \
+              /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+              for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+                [ -f "$f" ] || continue
+                sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${APT_PROXY}/|g; s|^deb[[:space:]]+https?://|deb ${APT_PROXY}/|g" "$f"
+              done
+            fi
+          fi
+          if [ -n "${YUM_REPO:-}" ] && [ -d /etc/yum.repos.d ]; then
+            grep -rqs "^baseurl=${YUM_REPO}/" /etc/yum.repos.d 2>/dev/null || \
+              sed -i -E "s|^baseurl=https?://|baseurl=${YUM_REPO}/|" /etc/yum.repos.d/*.repo
+          fi
+          # apk / apt / dnf read the lower-case proxy names, so mirror the upper-case ones
+          [ -n "${HTTP_PROXY:-}" ] && export http_proxy="${HTTP_PROXY}"
+          [ -n "${HTTPS_PROXY:-}" ] && export https_proxy="${HTTPS_PROXY}"
+          [ -n "${NO_PROXY:-}" ] && export no_proxy="${NO_PROXY}"
+          [ -n "${ALL_PROXY:-}" ] && export all_proxy="${ALL_PROXY}"
           if ! { command -v node >/dev/null 2>&1 && command -v git >/dev/null 2>&1; }; then
             if command -v apk >/dev/null 2>&1; then
               apk add --no-cache nodejs npm git curl ca-certificates
@@ -271,6 +312,34 @@ jobs:
     steps:
       - name: Bootstrap job container
         run: |
+          # The container's own package installs honour the repository variables,
+          # using the same convention as the Dockerfiles: APK_REPO / APT_PROXY /
+          # YUM_REPO are repository roots, a forward proxy goes through
+          # HTTP(S)_PROXY. Every rewrite is grep-guarded, so the same ones in
+          # prepare (which runs later, with node) are a no-op instead of a
+          # doubled prefix.
+          if [ -n "${APK_REPO:-}" ] && [ -f /etc/apk/repositories ]; then
+            grep -q "^${APK_REPO}/" /etc/apk/repositories || \
+              sed -i "s|^https\?://|${APK_REPO}/|" /etc/apk/repositories
+          fi
+          if [ -n "${APT_PROXY:-}" ] && [ -d /etc/apt ]; then
+            if ! grep -rqs -e "URIs: ${APT_PROXY}/" -e "^deb ${APT_PROXY}/" \
+              /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+              for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+                [ -f "$f" ] || continue
+                sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${APT_PROXY}/|g; s|^deb[[:space:]]+https?://|deb ${APT_PROXY}/|g" "$f"
+              done
+            fi
+          fi
+          if [ -n "${YUM_REPO:-}" ] && [ -d /etc/yum.repos.d ]; then
+            grep -rqs "^baseurl=${YUM_REPO}/" /etc/yum.repos.d 2>/dev/null || \
+              sed -i -E "s|^baseurl=https?://|baseurl=${YUM_REPO}/|" /etc/yum.repos.d/*.repo
+          fi
+          # apk / apt / dnf read the lower-case proxy names, so mirror the upper-case ones
+          [ -n "${HTTP_PROXY:-}" ] && export http_proxy="${HTTP_PROXY}"
+          [ -n "${HTTPS_PROXY:-}" ] && export https_proxy="${HTTPS_PROXY}"
+          [ -n "${NO_PROXY:-}" ] && export no_proxy="${NO_PROXY}"
+          [ -n "${ALL_PROXY:-}" ] && export all_proxy="${ALL_PROXY}"
           if ! { command -v node >/dev/null 2>&1 && command -v git >/dev/null 2>&1; }; then
             if command -v apk >/dev/null 2>&1; then
               apk add --no-cache nodejs npm git curl ca-certificates
@@ -382,6 +451,34 @@ jobs:
     steps:
       - name: Bootstrap job container
         run: |
+          # The container's own package installs honour the repository variables,
+          # using the same convention as the Dockerfiles: APK_REPO / APT_PROXY /
+          # YUM_REPO are repository roots, a forward proxy goes through
+          # HTTP(S)_PROXY. Every rewrite is grep-guarded, so the same ones in
+          # prepare (which runs later, with node) are a no-op instead of a
+          # doubled prefix.
+          if [ -n "${APK_REPO:-}" ] && [ -f /etc/apk/repositories ]; then
+            grep -q "^${APK_REPO}/" /etc/apk/repositories || \
+              sed -i "s|^https\?://|${APK_REPO}/|" /etc/apk/repositories
+          fi
+          if [ -n "${APT_PROXY:-}" ] && [ -d /etc/apt ]; then
+            if ! grep -rqs -e "URIs: ${APT_PROXY}/" -e "^deb ${APT_PROXY}/" \
+              /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+              for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+                [ -f "$f" ] || continue
+                sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${APT_PROXY}/|g; s|^deb[[:space:]]+https?://|deb ${APT_PROXY}/|g" "$f"
+              done
+            fi
+          fi
+          if [ -n "${YUM_REPO:-}" ] && [ -d /etc/yum.repos.d ]; then
+            grep -rqs "^baseurl=${YUM_REPO}/" /etc/yum.repos.d 2>/dev/null || \
+              sed -i -E "s|^baseurl=https?://|baseurl=${YUM_REPO}/|" /etc/yum.repos.d/*.repo
+          fi
+          # apk / apt / dnf read the lower-case proxy names, so mirror the upper-case ones
+          [ -n "${HTTP_PROXY:-}" ] && export http_proxy="${HTTP_PROXY}"
+          [ -n "${HTTPS_PROXY:-}" ] && export https_proxy="${HTTPS_PROXY}"
+          [ -n "${NO_PROXY:-}" ] && export no_proxy="${NO_PROXY}"
+          [ -n "${ALL_PROXY:-}" ] && export all_proxy="${ALL_PROXY}"
           if ! { command -v node >/dev/null 2>&1 && command -v git >/dev/null 2>&1; }; then
             if command -v apk >/dev/null 2>&1; then
               apk add --no-cache nodejs npm git curl ca-certificates

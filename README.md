@@ -185,8 +185,10 @@ docker run -d --restart always --name message-pusher -p 3000:3000 \
 | 环境变量 | 用途 |
 |---|---|
 | `APK_PROXY` / `APK_REPO` / `APT_PROXY` | apk / apt 包缓存代理：Alpine 改写 `/etc/apk/repositories`，Debian 系改写 sources 的 URI（path 型反向代理，不能用 http_proxy）。取值顺序 `APK_PROXY` → `APK_REPO` → `APT_PROXY` |
+| `YUM_REPO` | yum/dnf 仓库根（只有自定义 Dockerfile 声明了 `ARG YUM_REPO` 时才生效） |
 | `GOPROXY` | Go 模块代理（不设置则用 Go 官方代理） |
 | `NPM_PROXY` / `NPM_REGISTRY` | npm registry（容器内安装 pnpm 与前端依赖时使用；不设置则用官方源） |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `ALL_PROXY` | 真代理：显式作为 `--build-arg` 转发给构建容器（docker CLI 只会从 `~/.docker/config.json` 自动补代理 build arg，不读自己的环境变量） |
 
 ```shell
 # 不用局域网缓存，走公网默认源

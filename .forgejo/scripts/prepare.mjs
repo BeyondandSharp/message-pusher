@@ -9,11 +9,16 @@
 //      for us. Start it ourselves when nothing is reachable. (A daemon the runner
 //      already provided — mounted socket, DOCKER_HOST, admin-managed dind — is
 //      detected and left alone.)
-//   2. buildx: the dind/cli image ships the plugin; if the image is swapped for a
+//   2. package sources: point the container's own apk / apt / dnf-yum sources at
+//      `APK_REPO` / `APT_PROXY` / `YUM_REPO`, and mirror the generic proxies onto
+//      the lower-case names those managers read — the same rewriting the workflow
+//      bootstrap does before `node` exists (both are grep-guarded, so the second
+//      run is a no-op).
+//   3. buildx: the dind/cli image ships the plugin; if the image is swapped for a
 //      bare one, install it from the distribution package or the release binary.
-//   3. extra packages: `DOCKER_JOB_PACKAGES`, for repositories that need a
+//   4. extra packages: `DOCKER_JOB_PACKAGES`, for repositories that need a
 //      compiler or a tool the workbench image lacks.
-//   4. binfmt/QEMU: multi-architecture builds need it on the host kernel, and a
+//   5. binfmt/QEMU: multi-architecture builds need it on the host kernel, and a
 //      privileged job container is a place we can register it from.
 //
 // Everything is injectable (`run`, `spawnDetached`, `sleep`, `exists`, `readFile`,
@@ -129,6 +134,77 @@ function packageManagerInstall(manager, packages) {
     default:
       return null;
   }
+}
+
+/** The lower-case proxy names apk / apt / dnf actually read. */
+const PROXY_ALIASES = [
+  ['HTTP_PROXY', 'http_proxy'],
+  ['HTTPS_PROXY', 'https_proxy'],
+  ['NO_PROXY', 'no_proxy'],
+  ['ALL_PROXY', 'all_proxy'],
+];
+
+/**
+ * Point the job container's own package managers at the explicit repository
+ * variables — `APK_REPO` / `APT_PROXY` / `YUM_REPO` are repository roots, the
+ * same convention the Dockerfiles rewrite their sources with (a forward proxy
+ * goes through `HTTP(S)_PROXY`, which BuildKit forwards into the build) — and
+ * mirror the generic proxy variables onto the lower-case names apk / apt / dnf
+ * read.
+ *
+ * Every rewrite is grep-guarded, so the workflow's bootstrap step can apply the
+ * same ones before `node` exists and this call then becomes a no-op instead of
+ * prefixing the sources twice. Returns the roots that were applied.
+ */
+export function configurePackageSources(env = process.env, { run = spawnSync, exists = existsSync } = {}) {
+  const applied = { apk: '', apt: '', yum: '' };
+  const apply = (root, script) =>
+    run('sh', ['-c', script], {
+      env: { ...env, SOURCE_ROOT: root },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+  const apkRoot = readOptional(env.APK_REPO) || readOptional(env.APK_PROXY);
+  if (apkRoot && exists('/etc/apk/repositories')) {
+    apply(
+      apkRoot,
+      'grep -q "^${SOURCE_ROOT}/" /etc/apk/repositories || ' +
+        'sed -i "s|^https\\?://|${SOURCE_ROOT}/|" /etc/apk/repositories',
+    );
+    applied.apk = apkRoot;
+  }
+
+  const aptRoot = readOptional(env.APT_PROXY);
+  if (aptRoot && exists('/etc/apt')) {
+    apply(
+      aptRoot,
+      'if ! grep -rqs -e "URIs: ${SOURCE_ROOT}/" -e "^deb ${SOURCE_ROOT}/" ' +
+        '/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then ' +
+        'for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do ' +
+        '[ -f "$f" ] || continue; ' +
+        'sed -i -E "s|URIs:[[:space:]]*https?://|URIs: ${SOURCE_ROOT}/|g; ' +
+        's|^deb[[:space:]]+https?://|deb ${SOURCE_ROOT}/|g" "$f"; ' +
+        'done; fi',
+    );
+    applied.apt = aptRoot;
+  }
+
+  const yumRoot = readOptional(env.YUM_REPO);
+  if (yumRoot && exists('/etc/yum.repos.d')) {
+    apply(
+      yumRoot,
+      'grep -rqs "^baseurl=${SOURCE_ROOT}/" /etc/yum.repos.d 2>/dev/null || ' +
+        'sed -i -E "s|^baseurl=https?://|baseurl=${SOURCE_ROOT}/|" /etc/yum.repos.d/*.repo',
+    );
+    applied.yum = yumRoot;
+  }
+
+  for (const [upper, lower] of PROXY_ALIASES) {
+    const value = readOptional(env[upper]);
+    if (value) env[lower] = value;
+  }
+  return applied;
 }
 
 /**
@@ -319,6 +395,7 @@ export async function prepare({
   arch = '',
 } = {}) {
   const daemon = await ensureDaemon({ env, run, spawnDetached, sleep, exists, readFile, probe });
+  const packageSources = configurePackageSources(env, { run, exists });
   const buildx = ensureBuildx({ env, run });
   const extra = installPackages(env.DOCKER_JOB_PACKAGES, { run });
   const platforms = requestedPlatforms(env, { table });
@@ -337,9 +414,16 @@ export async function prepare({
     daemonStarted: daemon.started,
     buildx: buildx.source,
     packages: extra.packages,
+    packageSources,
     platforms,
     binfmt: binfmt.skipped ? 'skipped' : binfmt.remaining.length > 0 ? `missing:${binfmt.remaining.join(',')}` : 'ok',
   };
+  const appliedSources = Object.entries(packageSources)
+    .filter(([, root]) => root !== '')
+    .map(([manager, root]) => `${manager}=${root}`);
+  if (appliedSources.length > 0) {
+    process.stdout.write(`==> 作业容器的包源已指向仓库变量：${appliedSources.join(' ')}\n`);
+  }
   process.stdout.write(
     `[prepare] docker=${summary.server || '?'}（${summary.daemonStarted ? '本次启动' : '已可达'}） ` +
       `buildx=${summary.buildx} packages=${summary.packages.join(',') || '-'} ` +

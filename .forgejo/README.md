@@ -276,20 +276,20 @@ runner 没有直连外网时，先分清三件不同的事：**代理**（forwar
 
 | 变量 | 你填什么 | 判为**镜像 / registry** | 判为**代理** |
 | --- | --- | --- | --- |
-| `APT_PROXY` | Debian/Ubuntu 镜像根，如 `https://apt.internal` | 注入 `--build-arg APT_PROXY=<根>/debian`（Dockerfile 里 `ARG APT_PROXY` 后改写 sources）；`APK_PROXY` 同时复用这个根 | 不注入任何东西：真代理由 BuildKit 转发 `HTTP(S)_PROXY` 即可 |
-| `NPM_PROXY` | 内网 npm registry，如 `https://npm.internal` | 构建时注入 `--build-arg NPM_REGISTRY=<url>` | 不注入：BuildKit 转发 `HTTP(S)_PROXY` |
+| `APT_PROXY` | Debian/Ubuntu 镜像根，如 `https://apt.internal` | 注入 `--build-arg APT_PROXY=<根>/debian`（Dockerfile 里 `ARG APT_PROXY` 后改写 sources）；`APK_PROXY` 同时复用这个根；作业容器自身的 apt 安装也会改写 sources | 不注入任何东西：真代理走 `HTTP(S)_PROXY`，由本 Action 显式作为 `--build-arg` 转发 |
+| `NPM_PROXY` | 内网 npm registry，如 `https://npm.internal` | 构建时注入 `--build-arg NPM_REGISTRY=<url>` | 不注入：真代理走 `HTTP(S)_PROXY`，由本 Action 显式作为 `--build-arg` 转发 |
 | `GOPROXY` | Go module proxy（Athens 等） | 构建时注入 `--build-arg GOPROXY=<url>` | — |
 
 **apk / yum 的仓库用这两个（显式指定，不探测）**：
 
 | 变量 | 你填什么 | 结果 |
 | --- | --- | --- |
-| `APK_REPO` | apk 镜像根或完整仓库地址，如 `https://apk.internal` | 注入 `--build-arg APK_PROXY=<值>`；**优先于**上面判出来的 apt 镜像根 |
-| `YUM_REPO` | yum/dnf 镜像根或完整 baseurl | 注入 `--build-arg YUM_REPO=<值>` |
+| `APK_REPO` | apk 镜像根或完整仓库地址，如 `https://apk.internal` | 注入 `--build-arg APK_PROXY=<值>`；**优先于**上面判出来的 apt 镜像根；作业容器自身（bootstrap / `prepare`）的 apk 安装也会改写 `/etc/apk/repositories` |
+| `YUM_REPO` | yum/dnf 镜像根或完整 baseurl | 注入 `--build-arg YUM_REPO=<值>`；作业容器自身（bootstrap / `prepare`）的 dnf/yum 安装也会改写 `/etc/yum.repos.d` 里的 `baseurl` |
 
-**真正的 HTTP 转发代理**（只当代理，不做判别；BuildKit 会自动把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 转发进构建容器）：`ALL_PROXY`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`。
+**真正的 HTTP 转发代理**（只当代理，不做判别）：`ALL_PROXY`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`。构建时由本 Action **显式转发**——作为 `--build-arg` 传给每个变体的 `docker buildx build`（BuildKit 会自动补齐小写形式，`RUN` 步骤可见），需要 `docker-container` builder（多架构）时同时作为 `--driver-opt env.<变量>` 传给 builder 容器，让 buildkitd 自己也能拉基础镜像；`DOCKER_BUILD_ARGS` 里写了同名项时以显式项为准。注意 docker CLI 只会从自己的 `~/.docker/config.json`（`proxies`）自动补代理 build arg，**不会**读自己的环境变量，所以这一步必须显式做。
 
-想在 job 容器里装包（`DOCKER_JOB_PACKAGES`）时，`prepare` 调用的是容器自己的包管理器，走的是容器环境里的 `HTTP(S)_PROXY`；要指定 apk 仓库镜像，可在变量的基础上改用自带 sources 的工作台镜像。
+**作业容器自身的包安装**（bootstrap 装的 node/git/curl，以及 `prepare` 装的 `DOCKER_JOB_PACKAGES`、buildx）走的是同一套仓库变量，约定与 Dockerfile 一致——`APK_REPO` / `APT_PROXY` / `YUM_REPO` 是**仓库根**，改写容器的 `/etc/apk/repositories`、apt sources（含 deb822 的 `URIs:`）、yum `baseurl`；真代理走 `HTTP(S)_PROXY`（同时派生一份小写的 `http_proxy`/`https_proxy`/`no_proxy`/`all_proxy`，因为 apk / apt / dnf 读的是小写名）。改写是 grep 守卫、幂等的，bootstrap（node 还不存在）和 `prepare`（node 已存在）各做一次不会叠加前缀；填了哪个变量就改哪个，一个都没填时行为和以前完全一样。`APT_PROXY` 在作业容器里同样按「仓库根」处理（默认工作台是 Alpine，这条通常用不到）。
 
 ### 自动注入的 build arg
 
@@ -391,7 +391,7 @@ container:
 | --- | --- |
 | `docker` CLI + `dockerd` | 工作台镜像（默认 `docker:dind` 自带）；只有 `build` 作业需要 daemon |
 | `buildx` 插件 | 同上；换镜像时 `prepare` 会尝试安装（`publish` 用它的 `imagetools`） |
-| node / git / curl | 每个作业第一步 `Bootstrap job container` 用容器里的 apk/apt/dnf/yum 安装 |
+| node / git / curl | 每个作业第一步 `Bootstrap job container` 用容器里的 apk/apt/dnf/yum 安装（sources 按仓库变量改写） |
 | 额外工具（gcc、make…） | 仓库变量 `DOCKER_JOB_PACKAGES`，由 `prepare` 安装 |
 | QEMU binfmt（多架构） | `prepare` 注册（除非 `DOCKER_SKIP_BINFMT=1`）；只有 `build` 作业需要 |
 
@@ -402,10 +402,11 @@ container:
 只在 `build` 作业里运行，按顺序、幂等：
 
 1. 探测 daemon；不可达且镜像里有 `dockerd` → 在容器内启动它（日志 `/var/log/dockerd.log`，默认等待 90s，可用 `DOCKER_DIND_WAIT` 调整；overlay 起不来时自动用 `--storage-driver=vfs` 再试一次）。失败会打印 dockerd 日志尾部与上面的 runner 前置条件。
-2. 补 `buildx`：优先发行版包（alpine `docker-cli-buildx`、apt/dnf `docker-buildx-plugin`），再不行从 `DOCKER_BUILDX_URL`（默认 buildx 官方 latest）下载插件。
-3. 安装 `DOCKER_JOB_PACKAGES`。
-4. 按需注册 QEMU binfmt（镜像 `DOCKER_BINFMT_IMAGE`，默认 `tonistiigi/binfmt`）。
-5. 打一行摘要：`[prepare] docker=27.0.0（本次启动） buildx=image packages=- platforms=linux/amd64,linux/arm64 binfmt=ok`。
+2. 按仓库变量改写容器自身的包源（`APK_REPO` / `APT_PROXY` / `YUM_REPO`，grep 守卫、幂等，与 bootstrap 里的改写一致），并把大写代理变量派生为小写。
+3. 补 `buildx`：优先发行版包（alpine `docker-cli-buildx`、apt/dnf `docker-buildx-plugin`），再不行从 `DOCKER_BUILDX_URL`（默认 buildx 官方 latest）下载插件。
+4. 安装 `DOCKER_JOB_PACKAGES`。
+5. 按需注册 QEMU binfmt（镜像 `DOCKER_BINFMT_IMAGE`，默认 `tonistiigi/binfmt`）。
+6. 打一行摘要：`[prepare] docker=27.0.0（本次启动） buildx=image packages=- platforms=linux/amd64,linux/arm64 binfmt=ok`。
 
 ### 两种接法
 
