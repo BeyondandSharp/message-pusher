@@ -11,12 +11,20 @@ import {
 } from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { API, showError, showSuccess, testChannel } from '../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  testChannel,
+  useIsMobile,
+} from '../helpers';
 
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderChannel, renderTimestamp } from '../helpers/render';
+import MobileCardList from './MobileCardList';
 
 const ChannelsTable = () => {
+  const isMobile = useIsMobile();
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -262,6 +270,10 @@ const ChannelsTable = () => {
     Math.ceil(channels.length / ITEMS_PER_PAGE) +
     (channels.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
 
+  const pagedChannels = channels
+    .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
+    .filter((channel) => !channel.deleted);
+
   return (
     <>
       <Form layout='vertical' onFinish={searchChannels}>
@@ -276,24 +288,27 @@ const ChannelsTable = () => {
         </Form.Item>
       </Form>
 
-      <Table
-        columns={columns}
-        dataSource={channels
-          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
-          .filter((channel) => !channel.deleted)}
-        rowKey='id'
-        pagination={false}
-        size='small'
-      />
+      {isMobile ? (
+        <MobileCardList
+          columns={columns}
+          data={pagedChannels}
+          rowKey='id'
+          primaryKey='name'
+          secondaryKey='status'
+          loading={loading}
+        />
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={pagedChannels}
+          rowKey='id'
+          pagination={false}
+          size='small'
+          loading={loading}
+        />
+      )}
 
-      <div
-        style={{
-          marginTop: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+      <div className='table-footer'>
         <Link to='/channel/add'>
           <Button type='link' size='small' loading={loading}>
             添加新的通道
@@ -305,6 +320,7 @@ const ChannelsTable = () => {
           total={totalPages * ITEMS_PER_PAGE}
           pageSize={ITEMS_PER_PAGE}
           size='small'
+          simple={isMobile}
           showSizeChanger={false}
         />
       </div>

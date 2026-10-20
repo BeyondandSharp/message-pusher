@@ -12,9 +12,10 @@ import {
 } from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { API, showError, showSuccess } from '../helpers';
+import { API, showError, showSuccess, useIsMobile } from '../helpers';
 
 import { ITEMS_PER_PAGE } from '../constants';
+import MobileCardList from './MobileCardList';
 
 function renderRole(role) {
   switch (role) {
@@ -30,6 +31,7 @@ function renderRole(role) {
 }
 
 const UsersTable = () => {
+  const isMobile = useIsMobile();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -287,6 +289,10 @@ const UsersTable = () => {
     Math.ceil(users.length / ITEMS_PER_PAGE) +
     (users.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
 
+  const pagedUsers = users
+    .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
+    .filter((user) => !user.deleted);
+
   return (
     <>
       <Form layout='vertical' onFinish={searchUsers}>
@@ -301,24 +307,27 @@ const UsersTable = () => {
         </Form.Item>
       </Form>
 
-      <Table
-        columns={columns}
-        dataSource={users
-          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
-          .filter((user) => !user.deleted)}
-        rowKey='id'
-        pagination={false}
-        size='small'
-      />
+      {isMobile ? (
+        <MobileCardList
+          columns={columns}
+          data={pagedUsers}
+          rowKey='id'
+          primaryKey='username'
+          secondaryKey='role'
+          loading={loading}
+        />
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={pagedUsers}
+          rowKey='id'
+          pagination={false}
+          size='small'
+          loading={loading}
+        />
+      )}
 
-      <div
-        style={{
-          marginTop: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+      <div className='table-footer'>
         <Link to='/user/add'>
           <Button type='link' size='small' loading={loading}>
             添加新的用户
@@ -330,6 +339,7 @@ const UsersTable = () => {
           total={totalPages * ITEMS_PER_PAGE}
           pageSize={ITEMS_PER_PAGE}
           size='small'
+          simple={isMobile}
           showSizeChanger={false}
         />
       </div>

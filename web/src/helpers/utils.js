@@ -49,10 +49,6 @@ export async function copy(text) {
   return okay;
 }
 
-export function isMobile() {
-  return window.innerWidth <= 600;
-}
-
 // antd 的 message/notification 用 duration（秒）控制自动关闭，0 表示不自动关闭。
 // 原来是 react-toastify 的毫秒级 autoClose，这里做等值换算。
 const showErrorDuration = toastConstants.ERROR_TIMEOUT / 1000;

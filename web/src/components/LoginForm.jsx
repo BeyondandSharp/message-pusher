@@ -99,7 +99,11 @@ const LoginForm = () => {
   }
 
   return (
-    <Row justify='center' style={{ marginTop: '48px', textAlign: 'center' }}>
+    <Row
+      justify='center'
+      className='auth-page'
+      style={{ marginTop: '48px', textAlign: 'center' }}
+    >
       <Col style={{ maxWidth: 450 }}>
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <Image src='/logo.png' /> 用户登录

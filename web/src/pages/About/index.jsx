@@ -38,7 +38,10 @@ const About = () => {
           </a>
         </>
       ) : (
-        <div dangerouslySetInnerHTML={{ __html: about }}></div>
+        <div
+          className='rendered-html'
+          dangerouslySetInnerHTML={{ __html: about }}
+        ></div>
       )}
     </Card>
   );

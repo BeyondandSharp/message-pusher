@@ -18,12 +18,14 @@ import {
   showInfo,
   showSuccess,
   showWarning,
+  useIsMobile,
 } from '../helpers';
 
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderTimestamp } from '../helpers/render';
 import { Link } from 'react-router-dom';
 import { renderMarkdown } from '../helpers/markdown';
+import MobileCardList from './MobileCardList';
 
 // 列表自动刷新的间隔（秒）。默认 60 秒：消息推送流（SSE）已经能实时推新消息，
 // 原来的 10 秒一次在服务端 60 次/3 分钟的限流下（多标签页时）很容易触发 429。
@@ -65,6 +67,7 @@ function renderStatus(status) {
 }
 
 const MessagesTable = () => {
+  const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -347,7 +350,18 @@ const MessagesTable = () => {
           sortMessage('title');
         },
       }),
-      render: (title) => (title ? title : '无标题'),
+      render: (title, record) => (
+        <Button
+          type='link'
+          className='message-title'
+          aria-label={`查看消息 ${record.id}`}
+          onClick={() => {
+            viewMessage(record.id).then();
+          }}
+        >
+          {title ? title : '无标题'}
+        </Button>
+      ),
     },
     {
       title: '通道',
@@ -435,6 +449,10 @@ const MessagesTable = () => {
     Math.ceil(messages.length / ITEMS_PER_PAGE) +
     (messages.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
 
+  const pagedMessages = messages
+    .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
+    .filter((message) => !message.deleted);
+
   return (
     <>
       <Form layout='vertical' onFinish={searchMessages}>
@@ -448,25 +466,27 @@ const MessagesTable = () => {
           />
         </Form.Item>
       </Form>
-      <Table
-        columns={columns}
-        dataSource={messages
-          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
-          .filter((message) => !message.deleted)}
-        rowKey='id'
-        pagination={false}
-        size='small'
-        loading={loading}
-      />
-      <div
-        style={{
-          marginTop: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <div style={{ display: 'flex', gap: 8 }}>
+      {isMobile ? (
+        <MobileCardList
+          columns={columns}
+          data={pagedMessages}
+          rowKey='id'
+          primaryKey='title'
+          secondaryKey='status'
+          loading={loading}
+        />
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={pagedMessages}
+          rowKey='id'
+          pagination={false}
+          size='small'
+          loading={loading}
+        />
+      )}
+      <div className='table-footer'>
+        <div className='table-footer-actions'>
           <Button
             className='btn-invert'
             loading={loading}
@@ -494,6 +514,7 @@ const MessagesTable = () => {
           total={totalPages * ITEMS_PER_PAGE}
           pageSize={ITEMS_PER_PAGE}
           size='small'
+          simple={isMobile}
           showSizeChanger={false}
         />
       </div>
@@ -534,6 +555,7 @@ const MessagesTable = () => {
         )}
         {message.content ? (
           <div
+            className='message-content'
             dangerouslySetInnerHTML={{
               __html: renderMarkdown(message.content),
             }}

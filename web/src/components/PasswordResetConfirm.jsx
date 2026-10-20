@@ -42,7 +42,7 @@ const PasswordResetConfirm = () => {
   }
 
   return (
-    <Row justify='center' style={{ marginTop: '48px' }}>
+    <Row justify='center' className='auth-page' style={{ marginTop: '48px' }}>
       <Col style={{ maxWidth: 450 }}>
         <Typography.Title level={2} style={{ textAlign: 'center' }}>
           <img src='/logo.png' alt='logo' /> 密码重置确认

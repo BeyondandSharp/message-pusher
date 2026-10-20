@@ -1,69 +1,13 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserContext } from '../context/User';
 
 import { Button, Dropdown, Layout, Menu, Space } from 'antd';
-import {
-  ApartmentOutlined,
-  CloseOutlined,
-  CodeOutlined,
-  DownOutlined,
-  EditOutlined,
-  HomeOutlined,
-  InfoCircleOutlined,
-  MailOutlined,
-  MenuOutlined,
-  SettingOutlined,
-  UserOutlined,
-} from '@ant-design/icons';
-import { API, isAdmin, isMobile, showSuccess } from '../helpers';
+import { DownOutlined, UserOutlined } from '@ant-design/icons';
+import { API, isAdmin, showSuccess, useIsMobile } from '../helpers';
+import { NAV_ITEMS } from '../constants/navigation';
 import ThemeSwitch from './ThemeSwitch';
 import '../index.css';
-
-// Header Buttons
-const headerButtons = [
-  {
-    name: '首页',
-    to: '/',
-    icon: <HomeOutlined />,
-  },
-  {
-    name: '消息',
-    to: '/message',
-    icon: <MailOutlined />,
-  },
-  {
-    name: '编辑',
-    to: '/editor',
-    icon: <EditOutlined />,
-  },
-  {
-    name: '通道',
-    to: '/channel',
-    icon: <ApartmentOutlined />,
-  },
-  {
-    name: '接口',
-    to: '/webhook',
-    icon: <CodeOutlined />,
-  },
-  {
-    name: '用户',
-    to: '/user',
-    icon: <UserOutlined />,
-    admin: true,
-  },
-  {
-    name: '设置',
-    to: '/setting',
-    icon: <SettingOutlined />,
-  },
-  {
-    name: '关于',
-    to: '/about',
-    icon: <InfoCircleOutlined />,
-  },
-];
 
 const containerStyle = {
   maxWidth: 1127,
@@ -87,13 +31,11 @@ const headerStyle = {
 };
 
 const Header = () => {
+  const isMobile = useIsMobile();
   const [userState, userDispatch] = useContext(UserContext);
-  let navigate = useNavigate();
-
-  const [showSidebar, setShowSidebar] = useState(false);
+  const navigate = useNavigate();
 
   async function logout() {
-    setShowSidebar(false);
     await API.get('/api/user/logout');
     showSuccess('注销成功!');
     userDispatch({ type: 'logout' });
@@ -101,147 +43,102 @@ const Header = () => {
     navigate('/login');
   }
 
-  const toggleSidebar = () => {
-    setShowSidebar(!showSidebar);
-  };
-
-  const visibleButtons = headerButtons.filter(
+  // 与底部导航共用 NAV_ITEMS，管理员才看得到「用户」。
+  const visibleButtons = NAV_ITEMS.filter(
     (button) => !(button.admin && !isAdmin()),
   );
 
-  const renderButtons = (mobile) => {
-    return visibleButtons.map((button) => {
-      if (mobile) {
-        return {
-          key: button.to,
-          label: button.name,
-          onClick: () => {
-            navigate(button.to);
-            setShowSidebar(false);
+  const menuItems = visibleButtons.map((button) => {
+    const Icon = button.icon;
+    return {
+      key: button.to,
+      icon: <Icon />,
+      label: <Link to={button.to}>{button.name}</Link>,
+    };
+  });
+
+  const renderMobileAccount = () => {
+    if (!userState.user) {
+      return (
+        <Link to='/login' style={{ color: 'inherit', whiteSpace: 'nowrap' }}>
+          登录
+        </Link>
+      );
+    }
+    return (
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            { key: 'setting', label: '设置' },
+            { key: 'logout', label: '注销', danger: true },
+          ],
+          onClick: ({ key }) => {
+            if (key === 'setting') {
+              navigate('/setting');
+            } else if (key === 'logout') {
+              logout();
+            }
           },
-        };
-      }
-      return {
-        key: button.to,
-        icon: button.icon,
-        label: <Link to={button.to}>{button.name}</Link>,
-      };
-    });
+        }}
+      >
+        <Button type='text' aria-label='账户菜单' icon={<UserOutlined />} />
+      </Dropdown>
+    );
   };
 
-  if (isMobile()) {
+  const renderDesktopAccount = () => {
+    if (!userState.user) {
+      return (
+        <Link to='/login' style={{ color: 'inherit', whiteSpace: 'nowrap' }}>
+          登录
+        </Link>
+      );
+    }
     return (
-      <>
-        <Layout.Header style={headerStyle}>
-          <div
-            style={{
-              ...containerStyle,
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <Link
-              to='/'
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                color: 'inherit',
-              }}
-            >
-              <img
-                src='/logo.png'
-                alt='logo'
-                style={{ height: 32, marginRight: '0.75em' }}
-              />
-              <span style={{ fontSize: '20px' }}>
-                <b>消息推送服务</b>
-              </span>
-            </Link>
-            <Space>
-              <ThemeSwitch />
-              <Button
-                type='text'
-                aria-label='menu'
-                icon={showSidebar ? <CloseOutlined /> : <MenuOutlined />}
-                onClick={toggleSidebar}
-              />
-            </Space>
-          </div>
-        </Layout.Header>
-        {showSidebar ? (
-          <div style={containerStyle}>
-            <Menu
-              mode='inline'
-              items={renderButtons(true)}
-              style={{ width: '100%', borderInlineEnd: 'none' }}
-            />
-            <div style={{ padding: '8px 0' }}>
-              {userState.user ? (
-                <Button onClick={logout}>注销</Button>
-              ) : (
-                <Space>
-                  <Button
-                    onClick={() => {
-                      setShowSidebar(false);
-                      navigate('/login');
-                    }}
-                  >
-                    登录
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setShowSidebar(false);
-                      navigate('/register');
-                    }}
-                  >
-                    注册
-                  </Button>
-                </Space>
-              )}
-            </div>
-          </div>
-        ) : (
-          <></>
-        )}
-      </>
+      <Dropdown
+        menu={{
+          items: [{ key: 'logout', label: '注销' }],
+          onClick: ({ key }) => {
+            if (key === 'logout') logout();
+          },
+        }}
+      >
+        <a
+          onClick={(e) => e.preventDefault()}
+          style={{ color: 'inherit', whiteSpace: 'nowrap' }}
+        >
+          {userState.user.username} <DownOutlined />
+        </a>
+      </Dropdown>
     );
-  }
+  };
 
   return (
-    <>
-      <Layout.Header style={headerStyle}>
-        <div
-          style={{
-            ...containerStyle,
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <Link
-            to='/'
-            className={'hide-on-mobile'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              color: 'inherit',
-              marginRight: '1em',
-            }}
-          >
-            <img
-              src='/logo.png'
-              alt='logo'
-              style={{ height: 32, marginRight: '0.75em' }}
-            />
-            <span style={{ fontSize: '20px' }}>
-              <b>消息推送服务</b>
-            </span>
-          </Link>
+    <Layout.Header style={headerStyle}>
+      <div
+        style={{
+          ...containerStyle,
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Link to='/' className='header-brand'>
+          <img
+            src='/logo.png'
+            alt='logo'
+            style={{ height: 32, marginRight: '0.75em' }}
+          />
+          <span className='header-brand-text'>
+            <b>消息推送服务</b>
+          </span>
+        </Link>
+        {!isMobile && (
           <Menu
             mode='horizontal'
-            items={renderButtons(false)}
+            items={menuItems}
             style={{
               flex: 1,
               minWidth: 0,
@@ -249,34 +146,13 @@ const Header = () => {
               background: 'transparent',
             }}
           />
+        )}
+        <Space size={0}>
           <ThemeSwitch />
-          {userState.user ? (
-            <Dropdown
-              menu={{
-                items: [{ key: 'logout', label: '注销' }],
-                onClick: ({ key }) => {
-                  if (key === 'logout') logout();
-                },
-              }}
-            >
-              <a
-                onClick={(e) => e.preventDefault()}
-                style={{ color: 'inherit', whiteSpace: 'nowrap' }}
-              >
-                {userState.user.username} <DownOutlined />
-              </a>
-            </Dropdown>
-          ) : (
-            <Link
-              to='/login'
-              style={{ color: 'inherit', whiteSpace: 'nowrap' }}
-            >
-              登录
-            </Link>
-          )}
-        </div>
-      </Layout.Header>
-    </>
+          {isMobile ? renderMobileAccount() : renderDesktopAccount()}
+        </Space>
+      </div>
+    </Layout.Header>
   );
 };
 

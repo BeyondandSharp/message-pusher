@@ -6,6 +6,9 @@
   --quote-border: #d9d9d9;
   --header-border: #f0f0f0;
   --code-border: #d9d9d9;
+  --card-bg: #ffffff;
+  /* 移动端底部导航高度；index.css 末尾的 body padding-bottom 与 .bottom-nav 共用 */
+  --bottom-nav-height: 56px;
 }
 
 [data-theme='dark'] {
@@ -14,6 +17,7 @@
   --quote-border: #424242;
   --header-border: #2e2e2e;
   --code-border: #424242;
+  --card-bg: #1a1a1a;
   color-scheme: dark;
 }
 
@@ -22,6 +26,7 @@ body {
   /* 给固定在顶部的 Header 预留高度：56px 内容 + 1px 下边框（见 helpers/theme.js 的 HEADER_HEIGHT） */
   padding-top: 49px;
   overflow-y: scroll;
+  overscroll-behavior-x: none;
   background: var(--page-bg);
   color: var(--page-fg);
   font-family:
@@ -46,9 +51,34 @@ code {
 
 .custom-footer {
   font-size: 1.1em;
+  overflow-wrap: anywhere;
 }
 
-@media only screen and (max-width: 600px) {
+.custom-footer img {
+  max-width: 100%;
+  height: auto;
+}
+
+.custom-footer table {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-right: 1em;
+  color: inherit;
+}
+
+.header-brand-text {
+  font-size: 20px;
+  white-space: nowrap;
+}
+
+@media only screen and (max-width: 768px) {
   .hide-on-mobile {
     display: none !important;
   }
@@ -58,6 +88,232 @@ code {
   margin-left: 0;
   padding: 0 1em;
   border-left: 0.25em solid var(--quote-border);
+  overflow-wrap: anywhere;
+}
+
+/* 消息标题：桌面表格和移动卡片共用。标题可能很长，去掉按钮内边距并允许换行。 */
+.message-title.ant-btn {
+  height: auto;
+  padding: 0 !important;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* 表格底部的操作区 + 分页：窄屏时换行/纵向排列，避免撑破页面。 */
+.table-footer {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.table-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------- 移动端组件 */
+
+/* 底部主导航：固定在屏幕底部，菜单项可横向滚动。 */
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  background: var(--card-bg);
+  border-top: 1px solid var(--header-border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.bottom-nav-scroll {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.bottom-nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.bottom-nav-item {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 64px;
+  height: var(--bottom-nav-height);
+  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--page-fg);
+  opacity: 0.6;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav-item.active {
+  color: #1677ff;
+  opacity: 1;
+}
+
+.bottom-nav-item.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 24px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+.bottom-nav-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.bottom-nav-label {
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* 移动端表格卡片：每行一张卡片，字段竖排。 */
+.mobile-card-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-card {
+  padding: 12px;
+  border: 1px solid var(--header-border);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mobile-card-title {
+  min-width: 0;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-extra {
+  flex: none;
+}
+
+.mobile-card-fields {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-card-field {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mobile-card-field dt {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.mobile-card-field dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-theme='dark'] .mobile-card-field dt {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.mobile-card-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--header-border);
+}
+
+.mobile-card-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 渲染后的 Markdown/HTML（消息查看、关于、页脚）：图片、表格、长链接不撑破屏幕。 */
+.rendered-html,
+.message-content {
+  overflow-wrap: anywhere;
+}
+
+.rendered-html img,
+.message-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+.rendered-html pre,
+.message-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.rendered-html table,
+.message-content table {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.rendered-html th,
+.rendered-html td,
+.message-content th,
+.message-content td {
+  overflow-wrap: anywhere;
+}
+
+.rendered-html a,
+.message-content a {
+  word-break: break-all;
+}
+
+/* 首页嵌入 iframe：高度扣掉固定顶栏（移动端还要扣掉底部导航）。 */
+.home-iframe {
+  width: 100%;
+  height: 100vh;
+  border: none;
 }
 
 /* 表格操作列的按钮：去掉外框，彼此拉开距离 */
@@ -66,6 +322,16 @@ code {
   background: transparent !important;
   box-shadow: none !important;
   padding-inline: 4px !important;
+}
+
+/* 上面的规则把 primary 按钮的底色也去掉了，白字会变成不可见；
+   表格里的 primary 操作（查看/编辑）改用主色文字。 */
+.ant-table-cell .ant-btn-primary {
+  color: #1677ff !important;
+}
+
+[data-theme='dark'] .ant-table-cell .ant-btn-primary {
+  color: #4096ff !important;
 }
 
 .ant-table-cell .ant-btn + .ant-btn {
@@ -159,4 +425,119 @@ code {
   right: 0 !important;
   bottom: -1px !important;
   border-bottom-width: 2px !important;
+}
+
+/* ---------------------------------------------------------------- 移动端布局
+   断点 768px 必须与 helpers/responsive.js 的 MOBILE_BREAKPOINT 保持一致。 */
+@media only screen and (max-width: 768px) {
+  body {
+    /* antd reset 把 body 固定成 100% 高，内容贴近视口底部时页脚会被
+       固定导航压住且无法滚动。移动端改成随内容增长，并预留导航 + 安全区。 */
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    padding-bottom: calc(
+      var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 8px
+    );
+  }
+
+  .header-brand {
+    margin-right: 0;
+  }
+
+  .header-brand-text {
+    font-size: 18px;
+  }
+
+  .main-content {
+    padding: 8px;
+  }
+
+  .main-content .ant-card-body {
+    padding: 16px 12px;
+  }
+
+  .main-content .ant-form-item {
+    margin-bottom: 16px;
+  }
+
+  .table-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .table-footer .ant-pagination {
+    align-self: center;
+    margin: 0;
+  }
+
+  .mobile-card-actions .ant-btn {
+    min-height: 32px;
+  }
+
+  /* iOS Safari 聚焦字号小于 16px 的输入框时会自动放大页面 */
+  .main-content input:not([type='checkbox']):not([type='radio']),
+  .main-content textarea,
+  .main-content .ant-select-selection-search-input {
+    font-size: 16px !important;
+  }
+
+  /* 弹窗不要贴边、不要超宽 */
+  .ant-modal {
+    max-width: calc(100vw - 24px);
+  }
+
+  .ant-modal .ant-modal-content {
+    padding: 16px 12px;
+  }
+
+  .ant-modal .ant-modal-header {
+    margin-bottom: 12px;
+  }
+
+  .ant-modal .ant-modal-title {
+    padding-right: 32px;
+    overflow-wrap: anywhere;
+  }
+
+  .main-content .ant-typography,
+  .main-content .ant-alert {
+    overflow-wrap: anywhere;
+  }
+
+  .main-content .ant-tabs-nav {
+    margin-bottom: 12px;
+  }
+
+  .custom-footer {
+    font-size: 0.95em;
+    padding-inline: 8px !important;
+  }
+
+  .auth-page {
+    margin-top: 16px !important;
+    padding: 0 8px;
+  }
+
+  .auth-page .ant-col {
+    width: 100%;
+  }
+
+  .home-iframe {
+    height: calc(
+      100vh - 49px - var(--bottom-nav-height) -
+        env(safe-area-inset-bottom, 0px)
+    );
+    height: calc(
+      100dvh - 49px - var(--bottom-nav-height) -
+        env(safe-area-inset-bottom, 0px)
+    );
+  }
+}
+
+/* 极窄屏（如 320px）：品牌文字让位给按钮，只保留 logo */
+@media only screen and (max-width: 359px) {
+  .header-brand-text {
+    display: none;
+  }
 }

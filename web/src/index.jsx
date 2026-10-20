@@ -6,6 +6,8 @@ import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import BottomNav from './components/BottomNav';
+import SwipeNav from './components/SwipeNav';
 import ToastBridge from './components/ToastBridge';
 import 'antd/dist/reset.css';
 import './index.css';
@@ -52,9 +54,12 @@ const Root = () => {
                 className={'main-content'}
                 style={{ maxWidth: 1127, margin: '0 auto' }}
               >
-                <App />
+                <SwipeNav>
+                  <App />
+                </SwipeNav>
               </div>
               <Footer />
+              <BottomNav />
             </BrowserRouter>
           </UserProvider>
         </StatusProvider>

@@ -12,12 +12,21 @@ import {
 } from 'antd';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import { API, copy, showError, showSuccess, showWarning } from '../helpers';
+import {
+  API,
+  copy,
+  showError,
+  showSuccess,
+  showWarning,
+  useIsMobile,
+} from '../helpers';
 
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderTimestamp } from '../helpers/render';
+import MobileCardList from './MobileCardList';
 
 const WebhooksTable = () => {
+  const isMobile = useIsMobile();
   const [webhooks, setWebhooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -260,6 +269,10 @@ const WebhooksTable = () => {
     Math.ceil(webhooks.length / ITEMS_PER_PAGE) +
     (webhooks.length % ITEMS_PER_PAGE === 0 ? 1 : 0);
 
+  const pagedWebhooks = webhooks
+    .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
+    .filter((webhook) => !webhook.deleted);
+
   return (
     <>
       <Form layout='vertical' onFinish={searchWebhooks}>
@@ -274,24 +287,27 @@ const WebhooksTable = () => {
         </Form.Item>
       </Form>
 
-      <Table
-        columns={columns}
-        dataSource={webhooks
-          .slice((activePage - 1) * ITEMS_PER_PAGE, activePage * ITEMS_PER_PAGE)
-          .filter((webhook) => !webhook.deleted)}
-        rowKey='id'
-        pagination={false}
-        size='small'
-      />
+      {isMobile ? (
+        <MobileCardList
+          columns={columns}
+          data={pagedWebhooks}
+          rowKey='id'
+          primaryKey='name'
+          secondaryKey='status'
+          loading={loading}
+        />
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={pagedWebhooks}
+          rowKey='id'
+          pagination={false}
+          size='small'
+          loading={loading}
+        />
+      )}
 
-      <div
-        style={{
-          marginTop: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+      <div className='table-footer'>
         <Link to='/webhook/add'>
           <Button type='link' size='small' loading={loading}>
             添加新的接口
@@ -303,6 +319,7 @@ const WebhooksTable = () => {
           total={totalPages * ITEMS_PER_PAGE}
           pageSize={ITEMS_PER_PAGE}
           size='small'
+          simple={isMobile}
           showSizeChanger={false}
         />
       </div>
