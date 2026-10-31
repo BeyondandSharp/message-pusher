@@ -1,8 +1,10 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"message-pusher/common"
+	"strings"
 	"time"
 )
 
@@ -26,6 +28,38 @@ type Message struct {
 	Async       bool   `json:"async" gorm:"-"`                  // if true, will send message asynchronously
 	RenderMode  string `json:"render_mode" gorm:"raw"`          // markdown (default), code, raw
 	MsgType     string `json:"msg_type" gorm:"column:msg_type"` // message type, currently only used by lark_app
+	// Extra 保存 Webhook 构建规则中自定义键渲染后的 JSON 文本，供自定义通道模板引用。
+	// 不对外暴露，但会随消息持久化，保证异步发送/重发时这些变量仍然存在。
+	Extra string `json:"-" gorm:"type:text"`
+}
+
+// SetExtraVariables 把自定义模板变量序列化后存入消息，供自定义通道使用。
+func (message *Message) SetExtraVariables(variables map[string]interface{}) error {
+	if len(variables) == 0 {
+		message.Extra = ""
+		return nil
+	}
+	data, err := json.Marshal(variables)
+	if err != nil {
+		return err
+	}
+	message.Extra = string(data)
+	return nil
+}
+
+// ExtraVariables 解析消息里保存的自定义模板变量。
+func (message *Message) ExtraVariables() map[string]interface{} {
+	if message.Extra == "" {
+		return nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(message.Extra))
+	decoder.UseNumber()
+	variables := make(map[string]interface{})
+	if err := decoder.Decode(&variables); err != nil {
+		common.SysError("消息自定义模板变量解析失败：" + err.Error())
+		return nil
+	}
+	return variables
 }
 
 func GetMessageByIds(id int, userId int) (*Message, error) {

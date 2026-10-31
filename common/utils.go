@@ -168,6 +168,6 @@ func GetTimestamp() int64 {
 }
 
 func Replace(s, old, new string, n int) string {
-	new = strings.TrimPrefix(strings.TrimSuffix(fmt.Sprintf("%q", new), "\""), "\"")
+	new = escapeTemplateValue(new)
 	return strings.Replace(s, old, new, n)
 }

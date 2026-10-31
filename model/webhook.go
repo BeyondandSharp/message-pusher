@@ -18,6 +18,9 @@ type WebhookConstructRule struct {
 	Content     interface{} `json:"content"`
 	URL         interface{} `json:"url"`
 	To          interface{} `json:"to"`
+	// Extra 保存除上面五个消息字段外的自定义键（已完成变量替换）。
+	// 这些键会随消息持久化，自定义消息通道的请求体可以用 $键名 引用。
+	Extra map[string]interface{} `json:"-"`
 }
 
 // WebhookConstructRuleString 把构建规则中的字段值转换为消息字段所需的字符串。
@@ -41,20 +44,38 @@ func WebhookConstructRuleString(value interface{}) string {
 // 变量替换发生在解析后的 JSON 结构上，而不是对 JSON 文本做字符串替换，
 // 因此变量值里含有引号、换行等特殊字符时不会破坏 JSON，
 // 并且嵌套在对象、数组中的变量同样会被替换。
+//
+// title / description / content / url / to 之外的键会原样保留到 rule.Extra，
+// 例如 {"content_test": "mmmmmsg"} 会变成自定义通道里的 $content_test。
 func RenderWebhookConstructRule(constructRule string, variables map[string]string) (*WebhookConstructRule, error) {
-	rule := &WebhookConstructRule{}
+	var raw map[string]interface{}
 	decoder := json.NewDecoder(strings.NewReader(constructRule))
 	// 用 json.Number 保留数字原本的写法，避免大整数被转成浮点数
 	decoder.UseNumber()
-	if err := decoder.Decode(rule); err != nil {
+	if err := decoder.Decode(&raw); err != nil {
 		return nil, err
 	}
+	if raw == nil {
+		raw = make(map[string]interface{})
+	}
 	pairs := sortedWebhookVariables(variables)
-	rule.Title = replaceWebhookVariables(rule.Title, pairs)
-	rule.Description = replaceWebhookVariables(rule.Description, pairs)
-	rule.Content = replaceWebhookVariables(rule.Content, pairs)
-	rule.URL = replaceWebhookVariables(rule.URL, pairs)
-	rule.To = replaceWebhookVariables(rule.To, pairs)
+	rule := &WebhookConstructRule{
+		Title:       replaceWebhookVariables(raw["title"], pairs),
+		Description: replaceWebhookVariables(raw["description"], pairs),
+		Content:     replaceWebhookVariables(raw["content"], pairs),
+		URL:         replaceWebhookVariables(raw["url"], pairs),
+		To:          replaceWebhookVariables(raw["to"], pairs),
+	}
+	for _, key := range []string{"title", "description", "content", "url", "to"} {
+		delete(raw, key)
+	}
+	if len(raw) > 0 {
+		extra := make(map[string]interface{}, len(raw))
+		for key, value := range raw {
+			extra[key] = replaceWebhookVariables(value, pairs)
+		}
+		rule.Extra = extra
+	}
 	return rule, nil
 }
 

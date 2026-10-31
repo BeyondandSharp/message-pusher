@@ -310,7 +310,7 @@ proxy_send_timeout 300s;
    }
    ```
    这里左边只是变量名，右边才是取值路径，所以 `"to": "imoke_email"` 这类写法是成立的。
-2. **构建规则**：一个 JSON 对象，**键固定为 `title` / `description` / `content` / `url` / `to`**（与消息字段一一对应，其它键会被忽略）。值可以：
+2. **构建规则**：一个 JSON 对象，其中 `title` / `description` / `content` / `url` / `to` 对应消息字段；**其它键会原样保留**，并成为自定义消息通道可用的模板变量（例如 `"content_test": "mmmmmsg"` 可以用 `$content_test` 引用）。值可以：
    + 直接写字符串，用 `$变量名` 引用提取规则里的变量（注意是 `$VAR`，不是 `${VAR}`）；
    + 写成 JSON 对象或数组（例如飞书卡片模板），嵌套在其中的 `$变量名` 同样会被替换。
    ```json
@@ -319,10 +319,28 @@ proxy_send_timeout 300s;
      "content": {
        "type": "template",
        "data": { "template_variable": { "title": "$title" } }
-     }
+     },
+     "content_test": "mmmmmsg"
    }
    ```
-   只有 `to` 会被传给消息的接收者字段，自定义消息通道的请求体里可以用 `$to` 引用它；其它自定义字段（例如 `agentid`）不会进入消息，请直接写死在自定义通道的请求体里。
+   只有 `to` 会被传给消息的接收者字段，自定义消息通道的请求体里可以用 `$to` 引用它。
+
+**自定义消息通道的模板变量：**
+
+自定义通道的请求体是一个 JSON 模板，支持 `$变量名`：
+
+- 消息字段：`$id`、`$title`、`$description`、`$content`、`$url`、`$to`、`$link`、`$channel`、`$timestamp`、`$render_mode`、`$msg_type`；
+- Webhook 构建规则里的自定义键，例如 `"content_test": "mmmmmsg"` 在请求体里写成 `$content_test`；
+- 如果变量本身是 JSON（例如构建规则生成的 `content` 是对象），可以用点号访问嵌套字段，数组下标用数字：
+  ```json
+  {
+    "title": "$title",
+    "template_id": "$content.data.template_id",
+    "nested_title": "$content.data.template_variable.title",
+    "content_test": "$content_test"
+  }
+  ```
+- 未定义的变量或无法解析的路径会原样保留；替换值会按 JSON 字符串转义，因此变量建议放在 JSON 引号内使用。
 
 **飞书消息类型（`msg_type`）：**
 

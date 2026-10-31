@@ -203,3 +203,44 @@ func TestWebhookConstructRuleString(t *testing.T) {
 		t.Fatalf("字符串应原样返回，实际为 %q", got)
 	}
 }
+
+func TestRenderWebhookConstructRuleExtra(t *testing.T) {
+	rule, err := RenderWebhookConstructRule(`{
+		"title": "$title",
+		"content": {
+			"type": "template",
+			"data": {"template_variable": {"title": "$title"}}
+		},
+		"content_test": "mmmmmsg",
+		"nested": {"value": "$title"},
+		"items": ["$title"]
+	}`, map[string]string{"title": "IP更新"})
+	if err != nil {
+		t.Fatalf("未预期的错误：%v", err)
+	}
+	if rule.Extra == nil {
+		t.Fatal("自定义键应保存在 Extra 中")
+	}
+	if got := rule.Extra["content_test"]; got != "mmmmmsg" {
+		t.Fatalf("content_test 不匹配：got %v", got)
+	}
+	nested, ok := rule.Extra["nested"].(map[string]interface{})
+	if !ok || nested["value"] != "IP更新" {
+		t.Fatalf("自定义键内部的变量未被替换：%#v", rule.Extra["nested"])
+	}
+	items, ok := rule.Extra["items"].([]interface{})
+	if !ok || len(items) != 1 || items[0] != "IP更新" {
+		t.Fatalf("自定义数组内的变量未被替换：%#v", rule.Extra["items"])
+	}
+	if _, exists := rule.Extra["title"]; exists {
+		t.Fatal("已知消息字段不应出现在 Extra 中")
+	}
+
+	plain, err := RenderWebhookConstructRule(`{"title": "$title"}`, map[string]string{"title": "t"})
+	if err != nil {
+		t.Fatalf("未预期的错误：%v", err)
+	}
+	if plain.Extra != nil {
+		t.Fatalf("没有自定义键时 Extra 应为 nil，实际为 %#v", plain.Extra)
+	}
+}

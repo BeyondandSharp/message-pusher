@@ -783,7 +783,16 @@ const EditChannel = () => {
                   <br />
                   支持以下模板变量：<code>$title</code>，
                   <code>$description</code>，<code>$content</code>，
-                  <code>$url</code>，<code>$to</code>。
+                  <code>$url</code>，<code>$to</code>，<code>$link</code>，
+                  <code>$channel</code>，<code>$timestamp</code>，
+                  <code>$msg_type</code>，<code>$render_mode</code>。
+                  <br />
+                  Webhook「构建规则」里的其它自定义键也会成为变量，例如{' '}
+                  <code>content_test</code> 可用 <code>$content_test</code>{' '}
+                  引用。变量本身是 JSON 时支持点号路径，例如{' '}
+                  <code>$content.data.template_variable.title</code>
+                  ，数组下标用数字，例如 <code>$content.items.0.title</code>
+                  。未定义的变量会原样保留。
                   <br />
                   <a
                     href='https://iamazing.cn/page/message-pusher-common-custom-templates'
@@ -812,7 +821,7 @@ const EditChannel = () => {
             <FormGroup>
               <Form.Item label='请求体'>
                 <CodeEditor
-                  placeholder='在此输入请求体，支持模板变量，必须为合法的 JSON 格式'
+                  placeholder='在此输入请求体，支持 $title、$content.data.xxx 等模板变量，必须为合法的 JSON 格式'
                   value={inputs.other}
                   language='json'
                   minHeight={200}

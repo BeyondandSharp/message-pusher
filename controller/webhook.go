@@ -301,5 +301,14 @@ func TriggerWebhook(c *gin.Context) {
 		URL:         model.WebhookConstructRuleString(constructRule.URL),
 		To:          model.WebhookConstructRuleString(constructRule.To),
 	}
+	// 构建规则里的其它自定义键（如 content_test）会保存到消息上，
+	// 自定义通道的请求体模板可以用 $content_test 引用。
+	if err := message.SetExtraVariables(constructRule.Extra); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Webhook 构建规则中的自定义字段无法序列化：" + err.Error(),
+		})
+		return
+	}
 	processMessage(c, message, user, false)
 }
